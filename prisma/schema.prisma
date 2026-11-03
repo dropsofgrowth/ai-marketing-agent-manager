@@ -1,0 +1,306 @@
+// AI Marketing & E-commerce Agent — database schema (phase 1).
+//
+// Conventions
+// - Tables and columns are snake_case in PostgreSQL; models/fields are camelCase in code.
+// - Money is stored as integer minor units (e.g. cents) + an ISO-4217 currency code.
+// - Third-party credentials are NEVER stored in plaintext. `encryptedCredentials`
+//   holds AES-256-GCM ciphertext produced by src/server/security/encryption.ts.
+// - Nothing in this schema triggers a live change on Meta, Shopify or Higgsfield.
+//   Changes are proposed as ApprovalRequest rows and require a human decision.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  APPROVER
+  EDITOR
+  VIEWER
+
+  @@map("member_role")
+}
+
+enum IntegrationProvider {
+  META_ADS
+  SHOPIFY
+  HIGGSFIELD
+
+  @@map("integration_provider")
+}
+
+enum ConnectionStatus {
+  NOT_CONFIGURED
+  MOCK
+  CONNECTED
+  ERROR
+  REVOKED
+
+  @@map("connection_status")
+}
+
+enum ApprovalType {
+  BUDGET_CHANGE
+  CREATIVE_PUBLISH
+
+  @@map("approval_type")
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  EXPIRED
+  /// Claimed for execution; prevents double execution of the same request.
+  EXECUTING
+  EXECUTED
+  FAILED
+
+  @@map("approval_status")
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+
+  @@map("risk_level")
+}
+
+enum RequestSource {
+  USER
+  AUTOMATION
+  AI_AGENT
+
+  @@map("request_source")
+}
+
+/// SIMULATED = executed against mock adapters only (no external side effects).
+/// LIVE is reserved for a future phase and is refused by the application today.
+enum ExecutionMode {
+  SIMULATED
+  LIVE
+
+  @@map("execution_mode")
+}
+
+enum CreativeStatus {
+  DRAFT
+  GENERATING
+  READY
+  PENDING_APPROVAL
+  APPROVED
+  PUBLISHED
+  FAILED
+
+  @@map("creative_status")
+}
+
+enum CreativeFormat {
+  IMAGE
+  VIDEO
+
+  @@map("creative_format")
+}
+
+model Workspace {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  currency      String   @default("USD") @db.Char(3)
+  timezone      String   @default("UTC")
+  defaultLocale String   @default("en") @map("default_locale")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  memberships Membership[]
+  connections IntegrationConnection[]
+  approvals   ApprovalRequest[]
+  creatives   Creative[]
+  automations Automation[]
+  auditLogs   AuditLog[]
+
+  @@map("workspaces")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  locale    String   @default("en")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  memberships        Membership[]
+  approvalsRequested ApprovalRequest[] @relation("ApprovalRequester")
+  approvalsReviewed  ApprovalRequest[] @relation("ApprovalReviewer")
+  creatives          Creative[]
+  auditLogs          AuditLog[]
+
+  @@map("users")
+}
+
+model Membership {
+  id          String     @id @default(cuid())
+  workspaceId String     @map("workspace_id")
+  userId      String     @map("user_id")
+  role        MemberRole @default(VIEWER)
+  createdAt   DateTime   @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@map("memberships")
+}
+
+/// One connected external account (Meta ad account, Shopify store, Higgsfield workspace).
+model IntegrationConnection {
+  id                    String              @id @default(cuid())
+  workspaceId           String              @map("workspace_id")
+  provider              IntegrationProvider
+  status                ConnectionStatus    @default(NOT_CONFIGURED)
+  /// e.g. "act_1234567890" for Meta, "my-store.myshopify.com" for Shopify.
+  externalAccountId     String?             @map("external_account_id")
+  displayName           String?             @map("display_name")
+  scopes                String[]            @default([])
+  /// AES-256-GCM ciphertext (base64url, versioned). Never plaintext.
+  encryptedCredentials  String?             @map("encrypted_credentials")
+  credentialsKeyVersion Int?                @map("credentials_key_version")
+  lastSyncedAt          DateTime?           @map("last_synced_at")
+  lastError             String?             @map("last_error")
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, provider, externalAccountId])
+  @@index([workspaceId, provider])
+  @@map("integration_connections")
+}
+
+/// AI-generated ad creative (Higgsfield). Publishing one requires an approved ApprovalRequest.
+model Creative {
+  id            String              @id @default(cuid())
+  workspaceId   String              @map("workspace_id")
+  title         String
+  prompt        String
+  format        CreativeFormat
+  aspectRatio   String              @map("aspect_ratio")
+  status        CreativeStatus      @default(DRAFT)
+  provider      IntegrationProvider @default(HIGGSFIELD)
+  providerJobId String?             @map("provider_job_id")
+  assetUrl      String?             @map("asset_url")
+  thumbnailUrl  String?             @map("thumbnail_url")
+  headline      String?
+  primaryText   String?             @map("primary_text")
+  callToAction  String?             @map("call_to_action")
+  /// Provider-specific metadata (model, seed, duration, mock flag...).
+  metadata      Json?
+  createdById   String?             @map("created_by_id")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+
+  workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User?             @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  approvals ApprovalRequest[]
+
+  @@index([workspaceId, status])
+  @@map("creatives")
+}
+
+/// A proposed change that must be approved by a human before anything is executed.
+model ApprovalRequest {
+  id               String              @id @default(cuid())
+  workspaceId      String              @map("workspace_id")
+  type             ApprovalType
+  status           ApprovalStatus      @default(PENDING)
+  title            String
+  /// Why the change is proposed (user note or automation rationale).
+  rationale        String?
+  /// Type-specific payload validated with zod in src/domain/approvals/schemas.ts.
+  payload          Json
+  riskLevel        RiskLevel           @default(MEDIUM) @map("risk_level")
+  source           RequestSource       @default(USER)
+  /// Automation id / agent run id when source != USER.
+  sourceRef        String?             @map("source_ref")
+  provider         IntegrationProvider
+  /// External id of the object the change targets (campaign id, ad set id...).
+  targetExternalId String              @map("target_external_id")
+  targetName       String              @map("target_name")
+  creativeId       String?             @map("creative_id")
+  requestedById    String?             @map("requested_by_id")
+  /// Display-name snapshot of who/what asked (user name or "Automation: …").
+  requestedByLabel String              @map("requested_by_label")
+  reviewedById     String?             @map("reviewed_by_id")
+  reviewNote       String?             @map("review_note")
+  reviewedAt       DateTime?           @map("reviewed_at")
+  executionMode    ExecutionMode?      @map("execution_mode")
+  executedAt       DateTime?           @map("executed_at")
+  executionResult  Json?               @map("execution_result")
+  expiresAt        DateTime?           @map("expires_at")
+  /// Optimistic-concurrency counter; every status transition increments it.
+  version          Int                 @default(0)
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creative    Creative? @relation(fields: [creativeId], references: [id], onDelete: SetNull)
+  requestedBy User?     @relation("ApprovalRequester", fields: [requestedById], references: [id], onDelete: SetNull)
+  reviewedBy  User?     @relation("ApprovalReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, status, createdAt])
+  @@index([workspaceId, targetExternalId])
+  @@map("approval_requests")
+}
+
+/// Rule that may PROPOSE changes. It can never execute them (enforced by a DB check constraint).
+model Automation {
+  id               String    @id @default(cuid())
+  workspaceId      String    @map("workspace_id")
+  name             String
+  description      String?
+  enabled          Boolean   @default(false)
+  /// Rule kind, e.g. "scale_winners" | "cut_losers" (see src/domain/automations/rules.ts).
+  kind             String
+  /// Rule thresholds, validated in code.
+  config           Json
+  requiresApproval Boolean   @default(true) @map("requires_approval")
+  lastEvaluatedAt  DateTime? @map("last_evaluated_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("automations")
+}
+
+/// Append-only record of every state change and sensitive action.
+model AuditLog {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  actorId     String?  @map("actor_id")
+  actorLabel  String   @map("actor_label")
+  /// Dotted action name, e.g. "approval.approved".
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor     User?     @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}

@@ -1,0 +1,144 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens. Neutrals, series and status colours follow a validated
+ * data-viz palette (CVD-checked in light and dark). Components use the
+ * semantic names below via Tailwind (bg-surface, text-ink-2, border-line…).
+ */
+:root {
+  color-scheme: light;
+  --page: #f5f5f2;
+  --surface: #fcfcfb;
+  --surface-2: #f0efec;
+  --line: #e1e0d9;
+  --line-strong: #c3c2b7;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-3: #6b6a65;
+  --axis: #898781;
+
+  --accent: #256abf;
+  --accent-hover: #1c5cab;
+  --accent-ink: #1c5cab;
+  --accent-soft: #e4eefb;
+  --on-accent: #ffffff;
+
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+
+  --good: #0ca30c;
+  --good-ink: #006300;
+  --good-soft: #e3f4e3;
+  --warning: #fab219;
+  --warning-ink: #7a4f00;
+  --warning-soft: #fdf1d6;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --critical-ink: #b42828;
+  --critical-soft: #fbe6e6;
+
+  --ring: rgba(11, 11, 11, 0.1);
+  --shadow: 0 1px 2px rgba(11, 11, 11, 0.04), 0 1px 1px rgba(11, 11, 11, 0.03);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: #232321;
+    --line: #2c2c2a;
+    --line-strong: #383835;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --ink-3: #a3a29a;
+    --axis: #898781;
+
+    --accent: #256abf;
+    --accent-hover: #2a78d6;
+    --accent-ink: #86b6ef;
+    --accent-soft: rgba(57, 135, 229, 0.16);
+    --on-accent: #ffffff;
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+
+    --good-ink: #3ec43e;
+    --good-soft: rgba(12, 163, 12, 0.16);
+    --warning-ink: #fab219;
+    --warning-soft: rgba(250, 178, 25, 0.14);
+    --critical-ink: #ef7d7d;
+    --critical-soft: rgba(208, 59, 59, 0.18);
+
+    --ring: rgba(255, 255, 255, 0.1);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  }
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-axis: var(--axis);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+  --color-good: var(--good);
+  --color-good-ink: var(--good-ink);
+  --color-good-soft: var(--good-soft);
+  --color-warning: var(--warning);
+  --color-warning-ink: var(--warning-ink);
+  --color-warning-soft: var(--warning-soft);
+  --color-serious: var(--serious);
+  --color-critical: var(--critical);
+  --color-critical-ink: var(--critical-ink);
+  --color-critical-soft: var(--critical-soft);
+
+  --font-sans: var(--font-inter), var(--font-arabic), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --shadow-card: var(--shadow);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+/* Arabic: lead with the Arabic face so Latin glyphs and digits match its metrics. */
+:lang(ar) body {
+  font-family: var(--font-arabic), var(--font-inter), system-ui, sans-serif;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Native <dialog> backdrop. */
+dialog::backdrop {
+  background: rgba(11, 11, 11, 0.45);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
