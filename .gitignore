@@ -147,3 +147,12 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# --- AI Marketing Agent (Next.js / Prisma) ---
+# Generated Prisma client (re-created by `npm install` → postinstall)
+/src/generated/
+# Next.js generated types
+next-env.d.ts
+# Deployment / secrets
+.vercel
+*.pem
