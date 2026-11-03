@@ -2,11 +2,32 @@ import type { ReactNode } from "react";
 
 import { cn } from "@/lib/cn";
 
+/** Keeps the first column (the row's name) visible while the figures scroll sideways. */
+const STICKY_FIRST_COLUMN = cn(
+  "[&_tr>:first-child]:sticky [&_tr>:first-child]:start-0 [&_tr>:first-child]:z-[1] [&_tr>:first-child]:bg-surface",
+  "[&_tr>:first-child]:shadow-[inset_-1px_0_0_var(--line)] rtl:[&_tr>:first-child]:shadow-[inset_1px_0_0_var(--line)]",
+);
+
 /** Horizontally scrollable table wrapper — keeps the page itself from scrolling sideways. */
-export function TableContainer({ children, label }: { children: ReactNode; label?: string }) {
+export function TableContainer({
+  children,
+  label,
+  className,
+  stickyFirstColumn = false,
+}: {
+  children: ReactNode;
+  label?: string;
+  className?: string;
+  stickyFirstColumn?: boolean;
+}) {
   return (
-    <div className="relative overflow-x-auto" role="region" aria-label={label} tabIndex={label ? 0 : undefined}>
-      <table className="w-full border-collapse text-sm">{children}</table>
+    <div
+      className={cn("relative overflow-x-auto overscroll-x-contain", className)}
+      role="region"
+      aria-label={label}
+      tabIndex={label ? 0 : undefined}
+    >
+      <table className={cn("w-full border-collapse text-sm", stickyFirstColumn && STICKY_FIRST_COLUMN)}>{children}</table>
     </div>
   );
 }

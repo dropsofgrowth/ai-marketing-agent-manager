@@ -4,6 +4,7 @@ import type { Dictionary } from "./en";
 export const ar: Dictionary = {
   meta: {
     appName: "وكيل التسويق",
+    shortName: "وكيل التسويق",
     title: "وكيل التسويق والتجارة الإلكترونية بالذكاء الاصطناعي",
     description: "إعلانات Meta ومتجر Shopify والتصاميم بالذكاء الاصطناعي في لوحة واحدة — وكل تغيير يعتمده إنسان.",
   },
@@ -20,6 +21,15 @@ export const ar: Dictionary = {
     groupChannels: "القنوات",
     groupAgent: "الوكيل",
     pendingCount: "{count} بانتظار الموافقة",
+    mobile: "التنقل السريع",
+    more: "المزيد",
+    moreTitle: "كل الأقسام",
+    tabs: {
+      overview: "الرئيسية",
+      metaAds: "الإعلانات",
+      shopify: "Shopify",
+      approvals: "الموافقات",
+    },
   },
   shell: {
     openMenu: "فتح القائمة",
@@ -30,7 +40,10 @@ export const ar: Dictionary = {
     mockMode: "بيانات تجريبية",
     mockBanner:
       "تعمل التكاملات حاليًا على بيانات تجريبية. لا يُرسَل أي شيء إلى إعلانات Meta أو Shopify أو Higgsfield، وكل تغيير يتطلب موافقتك.",
+    mockBannerShort: "بيانات تجريبية فقط — لا يُرسَل أي شيء إلى Meta أو Shopify أو Higgsfield.",
     memoryStorage: "تخزين تجريبي — تُفقد التغييرات عند إعادة تشغيل الخادم.",
+    memoryStorageShort: "التخزين التجريبي يُمسح عند إعادة التشغيل.",
+    offline: "أنت غير متصل بالإنترنت. هذه آخر بيانات محمّلة، وستعمل الإجراءات مجددًا عند عودة الاتصال.",
     signedInAs: "مسجّل الدخول باسم {name}",
     roleOwner: "المالك (تجريبي)",
     skipToContent: "تخطَّ إلى المحتوى",
@@ -361,6 +374,23 @@ export const ar: Dictionary = {
     workspaceName: "الاسم",
     currency: "العملة",
     language: "اللغة",
+    app: "التطبيق والعرض",
+    appHint: "استخدم لوحة التحكم كتطبيق مثبّت على هاتفك أو حاسوبك.",
+    appearance: "المظهر",
+    appearanceSystem: "يتبع إعدادات جهازك (فاتح أو داكن)",
+    install: "التثبيت كتطبيق",
+    installButton: "تثبيت",
+    installInstalled: "مثبّت — أنت تستخدم التطبيق الآن.",
+    installAccepted: "جارٍ التثبيت… افتحه من الشاشة الرئيسية أو قائمة التطبيقات.",
+    installIos: "في Safari، اضغط زر المشاركة ثم «إضافة إلى الشاشة الرئيسية».",
+    installGeneric:
+      "استخدم خيار التثبيت في متصفحك: أيقونة التثبيت في شريط العنوان (Chrome وEdge) أو ملف ← إضافة إلى Dock (Safari على Mac).",
+    installInsecure: "يتطلب التثبيت اتصالًا آمنًا (HTTPS).",
+  },
+  offline: {
+    title: "أنت غير متصل بالإنترنت",
+    body: "يحتاج وكيل التسويق إلى اتصال لتحميل بيانات لوحة التحكم المباشرة. تحقّق من اتصالك ثم أعد المحاولة.",
+    retry: "إعادة المحاولة",
   },
   audit: {
     automationActor: "قاعدة الأتمتة «{name}»",

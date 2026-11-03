@@ -4,6 +4,14 @@ export type Locale = (typeof LOCALES)[number];
 export const DEFAULT_LOCALE: Locale = "en";
 export const LOCALE_COOKIE = "NEXT_LOCALE";
 
+/** Each language's own name (autonym) — the same in every UI language. */
+export const LOCALE_NAMES: Record<Locale, string> = { en: "English", ar: "العربية" };
+
+/** `document.cookie` value that makes "/" open in `locale` next time (1 year). */
+export function localeCookie(locale: Locale): string {
+  return `${LOCALE_COOKIE}=${locale}; path=/; max-age=31536000; samesite=lax`;
+}
+
 export function isLocale(value: unknown): value is Locale {
   return typeof value === "string" && (LOCALES as readonly string[]).includes(value);
 }

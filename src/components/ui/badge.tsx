@@ -18,16 +18,20 @@ export function Badge({
   icon,
   children,
   className,
+  wrap = false,
 }: {
   tone?: BadgeTone;
   icon?: ReactNode;
   children: ReactNode;
   className?: string;
+  /** Let long labels wrap (e.g. sentence-length statuses on narrow screens). */
+  wrap?: boolean;
 }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium",
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
+        wrap ? "text-start" : "whitespace-nowrap",
         TONES[tone],
         className,
       )}

@@ -67,13 +67,14 @@ async function OverviewContent({ i18n }: { i18n: ServerI18n }) {
     .slice(0, 5);
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+    <div className="space-y-5 sm:space-y-6">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatTile
           label={dict.kpi.revenue}
           value={fmt.currency(perf.kpis.revenue.value, currency, { compact: true })}
           delta={deltaOf(perf.kpis.revenue.delta, pct)}
           deltaLabel={vs}
+          trend={perf.trends.revenue}
         />
         <StatTile
           label={dict.kpi.adSpend}
@@ -81,6 +82,7 @@ async function OverviewContent({ i18n }: { i18n: ServerI18n }) {
           delta={deltaOf(perf.kpis.spend.delta, pct)}
           deltaLabel={vs}
           upIsGood={null}
+          trend={perf.trends.spend}
         />
         <StatTile
           label={dict.kpi.blendedRoas}
@@ -88,12 +90,14 @@ async function OverviewContent({ i18n }: { i18n: ServerI18n }) {
           value={fmt.roas(perf.kpis.blendedRoas.value)}
           delta={deltaOf(perf.kpis.blendedRoas.delta, pct)}
           deltaLabel={vs}
+          trend={perf.trends.blendedRoas}
         />
         <StatTile
           label={dict.kpi.orders}
           value={fmt.number(perf.kpis.orders.value)}
           delta={deltaOf(perf.kpis.orders.delta, pct)}
           deltaLabel={vs}
+          trend={perf.trends.orders}
         />
       </div>
 

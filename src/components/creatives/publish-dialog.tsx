@@ -50,7 +50,7 @@ export function PublishDialog({
           </Field>
           <Notice tone="safety">{d.notice}</Notice>
           <ActionFeedback result={state} />
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end [&>*]:w-full sm:[&>*]:w-auto">
             <Button variant="ghost" onClick={close}>
               {dict.common.cancel}
             </Button>

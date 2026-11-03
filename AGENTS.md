@@ -36,4 +36,10 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - Use logical Tailwind utilities (`ms-`, `pe-`, `start-`, `text-start`, `rtl:`) so RTL works.
 - With Cache Components, request-time data (DB, env-dependent output, `searchParams`) must be read
   inside a `<Suspense>` boundary after `await connection()`.
-- Run `npm run check` (lint + typecheck + tests) and `npm run build` before committing.
+- Responsive: phones (< md) get the bottom tab bar, tablets the icon rail, desktop the sidebar. A wide
+  table needs a phone alternative (`<DataList>`/`<MetricGrid>` from `components/ui/data-list.tsx`, table
+  wrapped in `hidden md:block`). Use the `px-page` gutter so content clears notches; inputs stay ≥ 16px on phones.
+- PWA: never make `public/sw.js` cache pages, data or Server Action responses. After changing the logo or
+  the `offline` strings, run `npm run pwa:assets` (a test fails if `public/offline.html` is stale).
+- Run `npm run check` (lint + typecheck + tests) and `npm run build` before committing; for UI changes also
+  `npm start` + `npm run test:responsive`.

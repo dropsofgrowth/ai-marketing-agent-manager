@@ -77,7 +77,7 @@ async function AutomationList({ i18n }: { i18n: ServerI18n }) {
     <ul className="space-y-4">
       {automations.map((automation) => (
         <li key={automation.id}>
-          <Card as="article" className="p-5">
+          <Card as="article" className="p-4 sm:p-5">
             <div className="flex flex-wrap items-start gap-4">
               <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-ink">
                 <Workflow aria-hidden className="size-5" />

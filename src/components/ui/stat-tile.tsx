@@ -1,9 +1,10 @@
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
 
+import { Sparkline } from "@/components/charts/sparkline";
 import { cn } from "@/lib/cn";
 
 /**
- * KPI tile: label · value · optional delta vs a named period.
+ * KPI tile: label · value · optional delta vs a named period · optional trend.
  * Delta colour = direction × whether "up" is good for this metric.
  */
 export function StatTile({
@@ -13,6 +14,7 @@ export function StatTile({
   delta,
   deltaLabel,
   upIsGood = true,
+  trend,
 }: {
   label: string;
   value: string;
@@ -22,6 +24,8 @@ export function StatTile({
   deltaLabel?: string;
   /** null = neutral metric (e.g. spend): the delta is shown without good/bad colour. */
   upIsGood?: boolean | null;
+  /** Daily values for the period, oldest first (sparkline). */
+  trend?: number[];
 }) {
   const judged = delta && delta.direction !== "flat" && upIsGood !== null;
   const good = judged && (delta.direction === "up") === upIsGood;
@@ -29,11 +33,14 @@ export function StatTile({
   const Icon = !delta || delta.direction === "flat" ? Minus : delta.direction === "up" ? ArrowUpRight : ArrowDownRight;
 
   return (
-    <div className="rounded-xl border border-line bg-surface p-4 shadow-card">
-      <p className="text-[13px] text-ink-2" title={hint}>
+    <div className="@container flex min-w-0 flex-col rounded-xl border border-line bg-surface p-3.5 shadow-card sm:p-4">
+      <p className="text-xs text-ink-2 sm:text-[13px]" title={hint}>
         {label}
       </p>
-      <p className="mt-1.5 text-2xl font-semibold tracking-tight text-ink">{value}</p>
+      {/* Scales with the tile (container query units) so long localized values like "US$ ألف 95.3" stay on one line. */}
+      <p data-kpi-value className="tabular mt-1 text-[clamp(1rem,14cqi,1.5rem)] leading-tight font-semibold tracking-tight whitespace-nowrap text-ink sm:mt-1.5">
+        {value}
+      </p>
       {delta ? (
         <p className="mt-1 flex flex-wrap items-center gap-x-1 text-xs">
           <span
@@ -49,6 +56,11 @@ export function StatTile({
           </span>
           {deltaLabel ? <span className="text-ink-3">{deltaLabel}</span> : null}
         </p>
+      ) : null}
+      {trend ? (
+        <div className="mt-auto pt-3">
+          <Sparkline values={trend} />
+        </div>
       ) : null}
     </div>
   );

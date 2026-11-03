@@ -7,6 +7,7 @@ import { BudgetChangeDialog } from "@/components/approvals/budget-change-dialog"
 import { TimeSeriesChart } from "@/components/charts/time-series-chart";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { DataList, DataListItem, MetricGrid } from "@/components/ui/data-list";
 import { Notice } from "@/components/ui/notice";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionSkeleton } from "@/components/ui/skeleton";
@@ -16,6 +17,29 @@ import { richT } from "@/i18n/rich";
 import { getI18n, type ServerI18n } from "@/i18n/server";
 import { getApprovalConfig } from "@/server/services";
 import { loadCampaignRows, loadPerformance } from "@/server/queries/performance";
+
+type CampaignRow = Awaited<ReturnType<typeof loadCampaignRows>>[number];
+type Guardrails = ReturnType<typeof getApprovalConfig>["guardrails"];
+
+/** Budget action for one campaign: request a change, or show that one is already pending. */
+function CampaignAction({ row, guardrails, i18n, block }: { row: CampaignRow; guardrails: Guardrails; i18n: ServerI18n; block?: boolean }) {
+  const { campaign, hasOpenBudgetRequest } = row;
+  if (campaign.status === "ARCHIVED") return null;
+  if (hasOpenBudgetRequest) {
+    return (
+      <Badge tone="warning" icon={<Clock aria-hidden className="size-3" />}>
+        {i18n.dict.metaAds.pendingApproval}
+      </Badge>
+    );
+  }
+  return (
+    <BudgetChangeDialog
+      campaign={{ id: campaign.id, name: campaign.name, currency: campaign.currency, dailyBudgetMinor: campaign.dailyBudgetMinor }}
+      guardrails={guardrails}
+      block={block}
+    />
+  );
+}
 
 const DAYS = 30;
 
@@ -48,16 +72,17 @@ async function MetaAdsContent({ i18n }: { i18n: ServerI18n }) {
   const c = dict.metaAds.columns;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:space-y-6">
       <p className="text-sm text-ink-2">{richT(dict.metaAds.subtitle, { account: perf.account.name })}</p>
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatTile
           label={dict.kpi.adSpend}
           value={fmt.currency(perf.kpis.spend.value, currency, { compact: true })}
           delta={deltaOf(perf.kpis.spend.delta, pct)}
           deltaLabel={vs}
           upIsGood={null}
+          trend={perf.trends.spend}
         />
         <StatTile
           label={dict.kpi.roas}
@@ -65,18 +90,51 @@ async function MetaAdsContent({ i18n }: { i18n: ServerI18n }) {
           value={fmt.roas(perf.kpis.metaRoas.value)}
           delta={deltaOf(perf.kpis.metaRoas.delta, pct)}
           deltaLabel={vs}
+          trend={perf.trends.metaRoas}
         />
-        <StatTile label={dict.kpi.purchases} value={fmt.number(perf.adTotals.purchases)} />
+        <StatTile label={dict.kpi.purchases} value={fmt.number(perf.adTotals.purchases)} trend={perf.trends.purchases} />
         <StatTile
           label={dict.kpi.ctr}
           value={perf.adTotals.impressions ? fmt.percent(perf.adTotals.clicks / perf.adTotals.impressions, { digits: 2 }) : "—"}
+          trend={perf.trends.ctr}
         />
       </div>
 
       <Card>
         <CardHeader title={dict.metaAds.campaigns} description={t(dict.common.lastNDays, { n: DAYS })} />
-        <div className="pt-4">
-          <TableContainer label={dict.metaAds.campaigns}>
+        <DataList label={dict.metaAds.campaigns} className="mt-2">
+          {rows.map((row) => {
+            const { campaign, metrics, derived } = row;
+            return (
+              <DataListItem
+                key={campaign.id}
+                title={campaign.name}
+                subtitle={dict.metaAds.objective[campaign.objective]}
+                aside={
+                  <Badge tone={campaign.status === "ACTIVE" ? "good" : "neutral"}>{dict.metaAds.campaignStatus[campaign.status]}</Badge>
+                }
+                footer={<CampaignAction row={row} guardrails={guardrails} i18n={i18n} block />}
+              >
+                <MetricGrid
+                  items={[
+                    { label: c.dailyBudget, value: fmt.currency(campaign.dailyBudgetMinor, campaign.currency) },
+                    { label: c.spend, value: fmt.currency(metrics.spendMinor, campaign.currency) },
+                    {
+                      label: c.roas,
+                      value: fmt.roas(derived.roas),
+                      className: derived.roas !== null && derived.roas < 1 ? "text-critical-ink" : undefined,
+                    },
+                    { label: c.ctr, value: derived.ctr === null ? "—" : fmt.percent(derived.ctr, { digits: 2 }) },
+                    { label: c.purchases, value: fmt.number(metrics.purchases) },
+                    { label: c.cpa, value: derived.cpaMinor === null ? "—" : fmt.currency(derived.cpaMinor, campaign.currency) },
+                  ]}
+                />
+              </DataListItem>
+            );
+          })}
+        </DataList>
+        <div className="hidden pt-4 md:block">
+          <TableContainer label={dict.metaAds.campaigns} stickyFirstColumn>
             <thead>
               <tr>
                 <Th>{c.campaign}</Th>
@@ -93,46 +151,35 @@ async function MetaAdsContent({ i18n }: { i18n: ServerI18n }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ campaign, metrics, derived, hasOpenBudgetRequest }) => (
-                <tr key={campaign.id} className="hover:bg-surface-2/60">
-                  <Td className="min-w-56">
-                    <p className="font-medium">{campaign.name}</p>
-                    <p className="text-xs text-ink-2">{dict.metaAds.objective[campaign.objective]}</p>
-                  </Td>
-                  <Td>
-                    <Badge tone={campaign.status === "ACTIVE" ? "good" : "neutral"}>
-                      {dict.metaAds.campaignStatus[campaign.status]}
-                    </Badge>
-                  </Td>
-                  <Td numeric>{fmt.currency(campaign.dailyBudgetMinor, campaign.currency)}</Td>
-                  <Td numeric>{fmt.currency(metrics.spendMinor, campaign.currency)}</Td>
-                  <Td numeric>
-                    <span className={derived.roas !== null && derived.roas < 1 ? "text-critical-ink" : undefined}>
-                      {fmt.roas(derived.roas)}
-                    </span>
-                  </Td>
-                  <Td numeric>{derived.ctr === null ? "—" : fmt.percent(derived.ctr, { digits: 2 })}</Td>
-                  <Td numeric>{fmt.number(metrics.purchases)}</Td>
-                  <Td numeric>{derived.cpaMinor === null ? "—" : fmt.currency(derived.cpaMinor, campaign.currency)}</Td>
-                  <Td className="text-end">
-                    {campaign.status === "ARCHIVED" ? null : hasOpenBudgetRequest ? (
-                      <Badge tone="warning" icon={<Clock aria-hidden className="size-3" />}>
-                        {dict.metaAds.pendingApproval}
+              {rows.map((row) => {
+                const { campaign, metrics, derived } = row;
+                return (
+                  <tr key={campaign.id}>
+                    <Td className="min-w-48 lg:min-w-56">
+                      <p className="font-medium">{campaign.name}</p>
+                      <p className="text-xs text-ink-2">{dict.metaAds.objective[campaign.objective]}</p>
+                    </Td>
+                    <Td>
+                      <Badge tone={campaign.status === "ACTIVE" ? "good" : "neutral"}>
+                        {dict.metaAds.campaignStatus[campaign.status]}
                       </Badge>
-                    ) : (
-                      <BudgetChangeDialog
-                        campaign={{
-                          id: campaign.id,
-                          name: campaign.name,
-                          currency: campaign.currency,
-                          dailyBudgetMinor: campaign.dailyBudgetMinor,
-                        }}
-                        guardrails={guardrails}
-                      />
-                    )}
-                  </Td>
-                </tr>
-              ))}
+                    </Td>
+                    <Td numeric>{fmt.currency(campaign.dailyBudgetMinor, campaign.currency)}</Td>
+                    <Td numeric>{fmt.currency(metrics.spendMinor, campaign.currency)}</Td>
+                    <Td numeric>
+                      <span className={derived.roas !== null && derived.roas < 1 ? "text-critical-ink" : undefined}>
+                        {fmt.roas(derived.roas)}
+                      </span>
+                    </Td>
+                    <Td numeric>{derived.ctr === null ? "—" : fmt.percent(derived.ctr, { digits: 2 })}</Td>
+                    <Td numeric>{fmt.number(metrics.purchases)}</Td>
+                    <Td numeric>{derived.cpaMinor === null ? "—" : fmt.currency(derived.cpaMinor, campaign.currency)}</Td>
+                    <Td className="text-end">
+                      <CampaignAction row={row} guardrails={guardrails} i18n={i18n} />
+                    </Td>
+                  </tr>
+                );
+              })}
             </tbody>
           </TableContainer>
         </div>

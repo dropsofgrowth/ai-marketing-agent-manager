@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 
 import { useI18n } from "@/i18n/client";
 import { cn } from "@/lib/cn";
@@ -23,7 +23,6 @@ const COLOR_VAR: Record<SeriesColor, string> = {
   "series-3": "var(--series-3)",
 };
 
-const PLOT_HEIGHT = 220;
 
 function niceScale(maxValue: number, intervals = 4) {
   if (!(maxValue > 0)) return { max: 1, ticks: [0, 1] };
@@ -47,8 +46,10 @@ function xLabelIndices(count: number): number[] {
  * Time-series chart (line or column) with a crosshair tooltip.
  * - One y-axis only; values of different units belong in separate charts.
  * - Legend for 2+ series; a single series is named by the card title.
- * - Keyboard: focus the plot, then use ←/→ to move the readout.
- * - A data table is always available below the chart.
+ * - Mouse: hover. Touch: tap or drag sideways to scrub (vertical drags still
+ *   scroll the page); the readout stays until you tap outside the chart.
+ * - Keyboard: focus the plot, then use ←/→ (Home/End) to move the readout.
+ * - Height adapts to the screen; a data table is always available below.
  */
 export function TimeSeriesChart({
   title,
@@ -68,7 +69,23 @@ export function TimeSeriesChart({
   const { fmt, dict, dir } = useI18n();
   const [active, setActive] = useState<number | null>(null);
   const tableId = useId();
+  const figureRef = useRef<HTMLElement>(null);
+  // True while a touch/pen readout is pinned (it has no hover to end it).
+  const [pinned, setPinned] = useState(false);
   const n = dates.length;
+
+  // A pinned touch readout clears when the user taps anywhere outside the chart.
+  useEffect(() => {
+    if (!pinned) return;
+    const onPointerDown = (event: globalThis.PointerEvent) => {
+      if (!figureRef.current?.contains(event.target as Node)) {
+        setPinned(false);
+        setActive(null);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [pinned]);
 
   const formatValue = (value: number, compact = false) =>
     format.kind === "currency"
@@ -93,16 +110,38 @@ export function TimeSeriesChart({
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      setActive(event.key === "Home" ? 0 : n - 1);
+      return;
+    }
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
     const step = event.key === "ArrowRight" ? 1 : -1;
     setActive((current) => Math.min(n - 1, Math.max(0, (current ?? n - 1) + step)));
   };
 
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    setActive(indexFromPointer(event));
+    if (event.pointerType !== "mouse") setPinned(true);
+  };
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    // Mouse: hover. Touch/pen: only while pressed (a sideways drag scrubs).
+    if (event.pointerType === "mouse" || event.buttons > 0) setActive(indexFromPointer(event));
+  };
+  const onPointerLeave = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse") setActive(null);
+  };
+  // The browser took over the gesture (vertical scroll): drop the readout.
+  const onPointerCancel = () => {
+    setPinned(false);
+    setActive(null);
+  };
+
   const activeX = active !== null ? x(active) : 0;
 
   return (
-    <figure className="m-0">
+    <figure ref={figureRef} className="m-0">
       {series.length > 1 ? (
         <figcaption dir={dir} className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-2">
           {series.map((s) => (
@@ -121,9 +160,9 @@ export function TimeSeriesChart({
       )}
 
       {/* Time always runs left → right, also in RTL layouts. */}
-      <div dir="ltr" className="relative select-none" style={{ height: PLOT_HEIGHT + 28 }}>
+      <div dir="ltr" className="relative h-[200px] select-none sm:h-[248px]">
         {/* Y-axis labels */}
-        <div aria-hidden className="absolute top-0 left-0 w-12" style={{ height: PLOT_HEIGHT }}>
+        <div aria-hidden className="absolute top-0 bottom-7 left-0 w-12">
           {ticks.map((tick) => (
             <span
               key={tick}
@@ -137,7 +176,7 @@ export function TimeSeriesChart({
         </div>
 
         {/* Plot */}
-        <div className="absolute top-0 right-1 left-12" style={{ height: PLOT_HEIGHT }}>
+        <div className="absolute top-0 right-1 bottom-7 left-12">
           <svg
             aria-hidden
             viewBox="0 0 100 100"
@@ -277,12 +316,15 @@ export function TimeSeriesChart({
             role="img"
             aria-label={title}
             aria-describedby={tableId}
-            className="absolute inset-0 cursor-crosshair rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-            onPointerMove={(e) => setActive(indexFromPointer(e))}
-            onPointerDown={(e) => setActive(indexFromPointer(e))}
-            onPointerLeave={() => setActive(null)}
+            className="absolute inset-0 cursor-crosshair touch-pan-y rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            onPointerMove={onPointerMove}
+            onPointerDown={onPointerDown}
+            onPointerLeave={onPointerLeave}
+            onPointerCancel={onPointerCancel}
             onFocus={() => setActive((current) => current ?? n - 1)}
-            onBlur={() => setActive(null)}
+            onBlur={() => {
+              if (!pinned) setActive(null);
+            }}
             onKeyDown={onKeyDown}
           />
         </div>
@@ -308,7 +350,7 @@ export function TimeSeriesChart({
       </div>
 
       <details id={tableId} className="group mt-3 text-sm">
-        <summary className="cursor-pointer text-xs text-ink-2 hover:text-ink">
+        <summary className="cursor-pointer py-1 text-xs text-ink-2 hover:text-ink pointer-coarse:py-2.5">
           <span className="group-open:hidden">{dict.common.showTable}</span>
           <span className="hidden group-open:inline">{dict.common.hideTable}</span>
         </summary>
