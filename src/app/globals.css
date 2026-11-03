@@ -110,14 +110,55 @@
   --shadow-card: var(--shadow);
 }
 
+/*
+ * Layout metrics shared by the shell. The page gutter grows with the screen and
+ * never sits under a notch / rounded corner (env(safe-area-inset-*) needs
+ * viewport-fit=cover, set in the root layout's viewport export).
+ */
+:root {
+  --gutter: 1rem;
+  /* Height of the phone bottom tab bar, excluding the home-indicator inset. */
+  --tabbar-h: 3.75rem;
+}
+@media (width >= 40rem) {
+  :root {
+    --gutter: 1.5rem;
+  }
+}
+@media (width >= 64rem) {
+  :root {
+    --gutter: 2rem;
+  }
+}
+
+/* Horizontal page padding that also clears landscape notches (physical sides on purpose). */
+@utility px-page {
+  padding-left: max(var(--gutter), env(safe-area-inset-left));
+  padding-right: max(var(--gutter), env(safe-area-inset-right));
+}
+
+/* Space below the content so the fixed phone tab bar never covers it. */
+@utility pb-tabbar {
+  padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 1.5rem);
+}
+
+/* Fixed elements that must float above the phone tab bar (toasts). */
+@utility bottom-above-tabbar {
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 0.75rem);
+}
+
 html {
   -webkit-text-size-adjust: 100%;
+  /* Keep anchors/focus targets clear of the sticky header. */
+  scroll-padding-top: 4.5rem;
 }
 
 body {
   background: var(--page);
   color: var(--ink);
   font-family: var(--font-sans);
+  /* Native-feeling taps: components draw their own pressed/focus states. */
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* Arabic: lead with the Arabic face so Latin glyphs and digits match its metrics. */
@@ -132,6 +173,22 @@ body {
 /* Native <dialog> backdrop. */
 dialog::backdrop {
   background: rgba(11, 11, 11, 0.45);
+}
+
+/* Don't scroll the page behind an open modal (phones rubber-band otherwise). */
+html:has(dialog[open]:modal) {
+  overflow: hidden;
+}
+
+/* Slide-up entrance for bottom sheets (phones). */
+@keyframes sheet-in {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+}
+.animate-sheet-in {
+  animation: sheet-in 180ms ease-out;
 }
 
 @media (prefers-reduced-motion: reduce) {

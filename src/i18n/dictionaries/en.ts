@@ -6,6 +6,7 @@
 export const en = {
   meta: {
     appName: "Marketing Agent",
+    shortName: "Marketing",
     title: "AI Marketing & E-commerce Agent",
     description: "Meta Ads, Shopify and AI creatives in one dashboard — every change approved by a human.",
   },
@@ -22,6 +23,15 @@ export const en = {
     groupChannels: "Channels",
     groupAgent: "Agent",
     pendingCount: "{count} pending",
+    mobile: "Quick navigation",
+    more: "More",
+    moreTitle: "All sections",
+    tabs: {
+      overview: "Overview",
+      metaAds: "Ads",
+      shopify: "Shopify",
+      approvals: "Approvals",
+    },
   },
   shell: {
     openMenu: "Open menu",
@@ -32,7 +42,10 @@ export const en = {
     mockMode: "Mock data",
     mockBanner:
       "Integrations are running on mock data. Nothing is sent to Meta Ads, Shopify or Higgsfield, and every change needs your approval.",
+    mockBannerShort: "Mock data only — nothing is sent to Meta, Shopify or Higgsfield.",
     memoryStorage: "Demo storage — changes reset when the server restarts.",
+    memoryStorageShort: "Demo storage resets on restart.",
+    offline: "You're offline. This is the last data loaded; actions will work again once you reconnect.",
     signedInAs: "Signed in as {name}",
     roleOwner: "Owner (demo)",
     skipToContent: "Skip to content",
@@ -363,6 +376,23 @@ export const en = {
     workspaceName: "Name",
     currency: "Currency",
     language: "Language",
+    app: "App & display",
+    appHint: "Use the dashboard as an installed app on your phone or computer.",
+    appearance: "Appearance",
+    appearanceSystem: "Follows your device (light or dark)",
+    install: "Install as app",
+    installButton: "Install",
+    installInstalled: "Installed — you're using the app.",
+    installAccepted: "Installing… open it from your home screen or app list.",
+    installIos: "In Safari, tap Share, then “Add to Home Screen”.",
+    installGeneric:
+      "Use your browser's install option: the install icon in the address bar (Chrome, Edge) or File → Add to Dock (Safari on Mac).",
+    installInsecure: "Installing needs a secure (HTTPS) connection.",
+  },
+  offline: {
+    title: "You're offline",
+    body: "The Marketing Agent needs a connection to load live dashboard data. Check your connection and try again.",
+    retry: "Try again",
   },
   audit: {
     automationActor: "Automation “{name}”",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { directionOf, switchLocalePath } from "@/i18n/config";
+import { directionOf, localeCookie, switchLocalePath } from "@/i18n/config";
 import { ar } from "@/i18n/dictionaries/ar";
 import { en } from "@/i18n/dictionaries/en";
 import { createFormatter, interpolate } from "@/i18n/format";
@@ -70,6 +70,10 @@ describe("locale routing helpers", () => {
     expect(switchLocalePath("/en/meta-ads", "ar")).toBe("/ar/meta-ads");
     expect(switchLocalePath("/en", "ar")).toBe("/ar");
     expect(switchLocalePath("/settings", "en")).toBe("/en/settings");
+  });
+
+  it("builds a long-lived, site-wide locale cookie", () => {
+    expect(localeCookie("ar")).toBe("NEXT_LOCALE=ar; path=/; max-age=31536000; samesite=lax");
   });
 
   it("knows text direction", () => {

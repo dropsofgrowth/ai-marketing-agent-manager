@@ -4,15 +4,34 @@ import { Bot } from "lucide-react";
 import Link from "next/link";
 
 import { useI18n } from "@/i18n/client";
+import { cn } from "@/lib/cn";
 
-export function Brand() {
+/** App logo + name. `iconOnly` is used in the tablet rail, where the name would not fit. */
+export function Brand({
+  iconOnly = false,
+  className,
+  iconClassName,
+}: {
+  iconOnly?: boolean;
+  className?: string;
+  iconClassName?: string;
+}) {
   const { locale, dict } = useI18n();
   return (
-    <Link href={`/${locale}`} className="flex items-center gap-2.5 rounded-md">
-      <span className="grid size-8 place-items-center rounded-lg bg-accent text-on-accent">
+    <Link
+      href={`/${locale}`}
+      className={cn(
+        "flex min-w-0 items-center gap-2.5 rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+        className,
+      )}
+      aria-label={iconOnly ? dict.meta.appName : undefined}
+    >
+      <span className={cn("grid size-8 shrink-0 place-items-center rounded-lg bg-accent text-on-accent", iconClassName)}>
         <Bot aria-hidden className="size-[18px]" />
       </span>
-      <span className="text-[15px] font-semibold tracking-tight text-ink">{dict.meta.appName}</span>
+      {iconOnly ? null : (
+        <span className="truncate text-[15px] font-semibold tracking-tight text-ink">{dict.meta.appName}</span>
+      )}
     </Link>
   );
 }

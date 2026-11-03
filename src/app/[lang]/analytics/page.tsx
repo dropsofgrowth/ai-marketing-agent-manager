@@ -7,6 +7,7 @@ import { Suspense } from "react";
 import { BarList } from "@/components/charts/bar-list";
 import { TimeSeriesChart } from "@/components/charts/time-series-chart";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { DataList, DataListItem, MetricGrid } from "@/components/ui/data-list";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionSkeleton } from "@/components/ui/skeleton";
 import { StatTile, deltaOf } from "@/components/ui/stat-tile";
@@ -50,9 +51,9 @@ async function AnalyticsContent({
   const c = dict.metaAds.columns;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:space-y-6">
       {/* One filter row above everything it scopes. */}
-      <nav aria-label={dict.analytics.range} className="flex flex-wrap gap-1.5">
+      <nav aria-label={dict.analytics.range} className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
         {RANGE_OPTIONS.map((option) => {
           const selected = option === days;
           return (
@@ -62,7 +63,7 @@ async function AnalyticsContent({
               aria-current={selected ? "true" : undefined}
               scroll={false}
               className={cn(
-                "inline-flex h-8 items-center gap-1 rounded-lg border px-3 text-[13px]",
+                "inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border px-3 text-[13px] whitespace-nowrap pointer-coarse:h-10",
                 selected ? "border-accent bg-accent-soft font-semibold text-accent-ink" : "border-line-strong text-ink-2 hover:bg-surface-2",
               )}
             >
@@ -73,11 +74,11 @@ async function AnalyticsContent({
         })}
       </nav>
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatTile label={dict.kpi.revenue} value={fmt.currency(perf.kpis.revenue.value, currency, { compact: true })} delta={deltaOf(perf.kpis.revenue.delta, pct)} deltaLabel={vs} />
-        <StatTile label={dict.kpi.adSpend} value={fmt.currency(perf.kpis.spend.value, currency, { compact: true })} delta={deltaOf(perf.kpis.spend.delta, pct)} deltaLabel={vs} upIsGood={null} />
-        <StatTile label={dict.kpi.blendedRoas} hint={dict.kpi.blendedRoasHint} value={fmt.roas(perf.kpis.blendedRoas.value)} delta={deltaOf(perf.kpis.blendedRoas.delta, pct)} deltaLabel={vs} />
-        <StatTile label={dict.kpi.roas} hint={dict.kpi.roasHint} value={fmt.roas(perf.kpis.metaRoas.value)} delta={deltaOf(perf.kpis.metaRoas.delta, pct)} deltaLabel={vs} />
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        <StatTile label={dict.kpi.revenue} value={fmt.currency(perf.kpis.revenue.value, currency, { compact: true })} delta={deltaOf(perf.kpis.revenue.delta, pct)} deltaLabel={vs} trend={perf.trends.revenue} />
+        <StatTile label={dict.kpi.adSpend} value={fmt.currency(perf.kpis.spend.value, currency, { compact: true })} delta={deltaOf(perf.kpis.spend.delta, pct)} deltaLabel={vs} upIsGood={null} trend={perf.trends.spend} />
+        <StatTile label={dict.kpi.blendedRoas} hint={dict.kpi.blendedRoasHint} value={fmt.roas(perf.kpis.blendedRoas.value)} delta={deltaOf(perf.kpis.blendedRoas.delta, pct)} deltaLabel={vs} trend={perf.trends.blendedRoas} />
+        <StatTile label={dict.kpi.roas} hint={dict.kpi.roasHint} value={fmt.roas(perf.kpis.metaRoas.value)} delta={deltaOf(perf.kpis.metaRoas.delta, pct)} deltaLabel={vs} trend={perf.trends.metaRoas} />
       </div>
 
       <Card>
@@ -136,8 +137,29 @@ async function AnalyticsContent({
 
       <Card>
         <CardHeader title={dict.analytics.campaignBreakdown} description={t(dict.common.lastNDays, { n: days })} />
-        <div className="pt-4">
-          <TableContainer label={dict.analytics.campaignBreakdown}>
+        <DataList label={dict.analytics.campaignBreakdown} className="mt-2">
+          {rows.map(({ campaign, metrics, derived }) => (
+            <DataListItem
+              key={campaign.id}
+              title={campaign.name}
+              aside={<span className="tabular text-sm font-semibold text-ink">{fmt.roas(derived.roas)}</span>}
+            >
+              <MetricGrid
+                items={[
+                  { label: c.spend, value: fmt.currency(metrics.spendMinor, campaign.currency) },
+                  { label: dict.kpi.impressions, value: fmt.number(metrics.impressions, { compact: true }) },
+                  { label: dict.kpi.clicks, value: fmt.number(metrics.clicks) },
+                  { label: c.ctr, value: derived.ctr === null ? "—" : fmt.percent(derived.ctr, { digits: 2 }) },
+                  { label: dict.kpi.cpc, value: derived.cpcMinor === null ? "—" : fmt.currency(Math.round(derived.cpcMinor), campaign.currency) },
+                  { label: c.purchases, value: fmt.number(metrics.purchases) },
+                  { label: c.cpa, value: derived.cpaMinor === null ? "—" : fmt.currency(Math.round(derived.cpaMinor), campaign.currency) },
+                ]}
+              />
+            </DataListItem>
+          ))}
+        </DataList>
+        <div className="hidden pt-4 md:block">
+          <TableContainer label={dict.analytics.campaignBreakdown} stickyFirstColumn>
             <thead>
               <tr>
                 <Th>{c.campaign}</Th>
@@ -154,7 +176,7 @@ async function AnalyticsContent({
             <tbody>
               {rows.map(({ campaign, metrics, derived }) => (
                 <tr key={campaign.id}>
-                  <Td className="min-w-56 font-medium">{campaign.name}</Td>
+                  <Td className="min-w-48 font-medium lg:min-w-56">{campaign.name}</Td>
                   <Td numeric>{fmt.currency(metrics.spendMinor, campaign.currency)}</Td>
                   <Td numeric>{fmt.number(metrics.impressions)}</Td>
                   <Td numeric>{fmt.number(metrics.clicks)}</Td>

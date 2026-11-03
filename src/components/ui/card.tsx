@@ -31,7 +31,7 @@ export function CardHeader({
   id?: string;
 }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-3 px-5 pt-5">
+    <div className="flex flex-wrap items-start justify-between gap-3 px-4 pt-4 sm:px-5 sm:pt-5">
       <div className="min-w-0">
         <h2 id={id} className="text-[15px] font-semibold text-ink">
           {title}
@@ -44,5 +44,5 @@ export function CardHeader({
 }
 
 export function CardBody({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("p-5", className)}>{children}</div>;
+  return <div className={cn("p-4 sm:p-5", className)}>{children}</div>;
 }

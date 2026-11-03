@@ -22,9 +22,12 @@ export type BudgetGuardrailsView = {
 export function BudgetChangeDialog({
   campaign,
   guardrails,
+  block = false,
 }: {
   campaign: { id: string; name: string; currency: string; dailyBudgetMinor: number };
   guardrails: BudgetGuardrailsView;
+  /** Full-width trigger (phone record lists). */
+  block?: boolean;
 }) {
   const { dict, fmt, t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -45,7 +48,7 @@ export function BudgetChangeDialog({
 
   return (
     <>
-      <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>
+      <Button variant="secondary" size="sm" onClick={() => setOpen(true)} className={block ? "w-full" : undefined}>
         {dict.metaAds.requestBudgetChange}
       </Button>
       <Dialog open={open} onClose={close} title={d.title}>
@@ -107,7 +110,7 @@ export function BudgetChangeDialog({
           <Notice tone="safety">{d.notice}</Notice>
           <ActionFeedback result={state} />
 
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end [&>*]:w-full sm:[&>*]:w-auto">
             <Button variant="ghost" onClick={close}>
               {dict.common.cancel}
             </Button>

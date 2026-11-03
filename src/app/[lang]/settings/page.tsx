@@ -4,11 +4,13 @@ import { connection } from "next/server";
 import { Suspense, type ReactNode } from "react";
 
 import { IntegrationList } from "@/components/integrations/integration-list";
+import { AppSettings } from "@/components/settings/app-settings";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Notice } from "@/components/ui/notice";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionSkeleton } from "@/components/ui/skeleton";
+import { LOCALE_NAMES } from "@/i18n/config";
 import { getI18n, type ServerI18n } from "@/i18n/server";
 import { getEnv } from "@/server/env";
 import { getIntegrationStatuses } from "@/server/queries/integrations";
@@ -32,11 +34,12 @@ export default async function SettingsPage({ params }: PageProps<"/[lang]/settin
   );
 }
 
+/** Label/value row: stacked on phones, side by side from `sm`. */
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 py-3 first:pt-0 last:pb-0">
+    <div className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
       <dt className="text-sm text-ink-2">{label}</dt>
-      <dd className="text-sm font-medium text-ink">{children}</dd>
+      <dd className="min-w-0 text-sm font-medium text-ink sm:text-end">{children}</dd>
     </div>
   );
 }
@@ -70,6 +73,13 @@ async function SettingsContent({ i18n }: { i18n: ServerI18n }) {
   return (
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
       <Card className="xl:col-span-2">
+        <CardHeader title={s.app} description={s.appHint} />
+        <CardBody>
+          <AppSettings />
+        </CardBody>
+      </Card>
+
+      <Card className="xl:col-span-2">
         <CardHeader title={s.integrations} description={s.integrationsHint} />
         <CardBody>
           <IntegrationList statuses={getIntegrationStatuses()} i18n={i18n} showMissing />
@@ -81,7 +91,7 @@ async function SettingsContent({ i18n }: { i18n: ServerI18n }) {
         <CardBody>
           <dl className="divide-y divide-line">
             <Row label={s.liveExecution}>
-              <Badge tone={env.LIVE_EXECUTION_ENABLED ? "warning" : "good"}>
+              <Badge tone={env.LIVE_EXECUTION_ENABLED ? "warning" : "good"} wrap>
                 {env.LIVE_EXECUTION_ENABLED ? s.liveRequested : s.liveDisabled}
               </Badge>
             </Row>
@@ -142,7 +152,7 @@ async function SettingsContent({ i18n }: { i18n: ServerI18n }) {
             <dl className="divide-y divide-line">
               <Row label={s.workspaceName}>{DEMO_WORKSPACE.name}</Row>
               <Row label={s.currency}>{DEMO_WORKSPACE.currency}</Row>
-              <Row label={s.language}>{i18n.locale === "ar" ? "العربية" : "English"}</Row>
+              <Row label={s.language}>{LOCALE_NAMES[i18n.locale]}</Row>
             </dl>
           </CardBody>
         </Card>

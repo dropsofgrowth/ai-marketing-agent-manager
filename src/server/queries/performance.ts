@@ -3,12 +3,15 @@ import "server-only";
 import { OPEN_APPROVAL_STATUSES } from "@/domain/approvals/state-machine";
 import { getIntegrations } from "@/integrations/registry";
 import { previousRange, trailingRange, type DateRange } from "@/lib/dates";
-import { deriveMetrics, relativeDelta, sumMetrics } from "@/lib/metrics";
+import { averageOf, bucketSeries, deriveMetrics, pooledRatioOf, relativeDelta, sumMetrics } from "@/lib/metrics";
 import { getCurrentActor } from "@/server/auth/actor";
 import { getStore } from "@/server/store";
 
 export const RANGE_OPTIONS = [7, 14, 30, 90] as const;
 export type RangeDays = (typeof RANGE_OPTIONS)[number];
+
+/** Points per KPI sparkline (see bucketSeries). */
+const TREND_POINTS = 15;
 
 export function parseRange(value: string | string[] | undefined, fallback: RangeDays = 30): RangeDays {
   const n = Number(Array.isArray(value) ? value[0] : value);
@@ -42,6 +45,14 @@ export async function loadPerformance(days: number, now: Date) {
   const salesPrevTotals = sumSales(salesPrev);
   const blended = (revenue: number, spend: number) => (spend > 0 ? revenue / spend : null);
 
+  // One row per day with store and ad metrics joined on the date (for sparklines).
+  const adsByDate = new Map(ads.map((row) => [row.date, row]));
+  const daily = sales.map((s) => ({ ...s, ad: adsByDate.get(s.date) }));
+  type Day = (typeof daily)[number];
+  const trend = (reduce: (run: readonly Day[]) => number | null) =>
+    bucketSeries(daily, TREND_POINTS, reduce).map((v) => v ?? Number.NaN);
+  const spendOf = (d: Day) => d.ad?.spendMinor ?? 0;
+
   return {
     range,
     account,
@@ -50,6 +61,18 @@ export async function loadPerformance(days: number, now: Date) {
     sales,
     adTotals,
     salesTotals,
+    /** Sparkline series (oldest first); NaN marks a point without data. */
+    trends: {
+      revenue: trend(averageOf((d) => d.revenueMinor)),
+      spend: trend(averageOf(spendOf)),
+      orders: trend(averageOf((d) => d.orders)),
+      purchases: trend(averageOf((d) => d.ad?.purchases ?? 0)),
+      blendedRoas: trend(pooledRatioOf((d) => d.revenueMinor, spendOf)),
+      metaRoas: trend(pooledRatioOf((d) => d.ad?.purchaseValueMinor ?? 0, spendOf)),
+      aov: trend(pooledRatioOf((d) => d.revenueMinor, (d) => d.orders)),
+      conversionRate: trend(pooledRatioOf((d) => d.orders, (d) => d.sessions)),
+      ctr: trend(pooledRatioOf((d) => d.ad?.clicks ?? 0, (d) => d.ad?.impressions ?? 0)),
+    },
     kpis: {
       revenue: { value: salesTotals.revenueMinor, delta: relativeDelta(salesTotals.revenueMinor, salesPrevTotals.revenueMinor) },
       spend: { value: adTotals.spendMinor, delta: relativeDelta(adTotals.spendMinor, adPrevTotals.spendMinor) },

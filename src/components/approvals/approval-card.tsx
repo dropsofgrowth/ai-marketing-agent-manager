@@ -13,7 +13,7 @@ function BudgetDiff({ request, i18n }: { request: Extract<ApprovalRequest, { typ
   const { payload } = request;
   const { fmt, dict } = i18n;
   return (
-    <dl className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-lg bg-surface-2 px-4 py-3">
+    <dl className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-lg bg-surface-2 px-3 py-3 sm:px-4">
       <div>
         <dt className="text-xs text-ink-2">{dict.approvals.fields.current}</dt>
         <dd className="tabular text-lg font-semibold text-ink-2">
@@ -87,7 +87,7 @@ export function ApprovalCard({ request, i18n, now }: { request: ApprovalRequest;
   const result = request.executionResult;
 
   return (
-    <Card as="article" className="flex flex-col gap-4 p-5" aria-labelledby={`apr-${request.id}`}>
+    <Card as="article" className="flex flex-col gap-4 p-4 sm:p-5" aria-labelledby={`apr-${request.id}`}>
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge status={expired ? "EXPIRED" : request.status} i18n={i18n} />
         <RiskBadge risk={request.riskLevel} i18n={i18n} />

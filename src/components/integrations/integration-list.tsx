@@ -1,6 +1,7 @@
 import { CheckCircle2, CircleDashed, FlaskConical } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { richT } from "@/i18n/rich";
 import type { ServerI18n } from "@/i18n/server";
 import type { IntegrationStatus } from "@/server/queries/integrations";
 
@@ -13,7 +14,7 @@ export function IntegrationList({
   i18n: ServerI18n;
   showMissing?: boolean;
 }) {
-  const { dict, t } = i18n;
+  const { dict } = i18n;
   return (
     <ul className="divide-y divide-line">
       {statuses.map((s) => (
@@ -22,8 +23,14 @@ export function IntegrationList({
             <p className="text-sm font-medium text-ink">{dict.integrations[s.provider]}</p>
             <p className="text-xs text-ink-2">{dict.integrations.description[s.provider]}</p>
             {showMissing && s.missing.length ? (
-              <p className="mt-1 text-xs text-ink-3" dir="ltr">
-                {t(dict.settings.missingVars, { vars: s.missing.join(", ") })}
+              <p className="mt-1 text-xs break-words text-ink-3">
+                {richT(dict.settings.missingVars, {
+                  vars: (
+                    <span dir="ltr" className="font-mono text-[11px]">
+                      {s.missing.join(", ")}
+                    </span>
+                  ),
+                })}
               </p>
             ) : null}
             {showMissing ? <p className="mt-1 text-xs text-ink-3">{dict.integrations.liveAdapterPending}</p> : null}

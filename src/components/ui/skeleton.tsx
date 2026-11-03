@@ -9,7 +9,7 @@ export function SectionSkeleton({ label, tiles = 4 }: { label: string; tiles?: n
   return (
     <div role="status" aria-label={label} className="space-y-6">
       {tiles > 0 ? (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           {Array.from({ length: tiles }, (_, i) => (
             <Skeleton key={i} className="h-[104px] rounded-xl" />
           ))}

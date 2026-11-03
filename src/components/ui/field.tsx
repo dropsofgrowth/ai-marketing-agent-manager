@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
 
 export const inputClass = cn(
-  "block w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink",
+  "block w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-base text-ink sm:text-sm pointer-coarse:min-h-11",
   "placeholder:text-ink-3 focus:border-accent focus:outline-2 focus:outline-offset-0 focus:outline-accent/30",
   "aria-invalid:border-critical",
 );

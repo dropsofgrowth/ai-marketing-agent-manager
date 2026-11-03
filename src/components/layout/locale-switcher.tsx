@@ -4,7 +4,7 @@ import { Languages } from "lucide-react";
 import { usePathname } from "next/navigation";
 
 import { useI18n } from "@/i18n/client";
-import { LOCALE_COOKIE, switchLocalePath } from "@/i18n/config";
+import { localeCookie, switchLocalePath } from "@/i18n/config";
 
 /**
  * Switches between English and Arabic, keeping the current page. Uses a full
@@ -23,9 +23,9 @@ export function LocaleSwitcher() {
       hrefLang={target}
       lang={target}
       onClick={() => {
-        document.cookie = `${LOCALE_COOKIE}=${target}; path=/; max-age=31536000; samesite=lax`;
+        document.cookie = localeCookie(target);
       }}
-      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line-strong px-2.5 text-[13px] font-medium text-ink hover:bg-surface-2"
+      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line-strong px-2.5 text-[13px] font-medium whitespace-nowrap text-ink hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent active:bg-surface-2 pointer-coarse:h-10"
       aria-label={dict.shell.switchLanguageLabel}
     >
       <Languages aria-hidden className="size-4" />
