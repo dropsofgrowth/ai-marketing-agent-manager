@@ -48,10 +48,12 @@ const envSchema = z.object({
   ),
 
   CREDENTIALS_ENCRYPTION_KEY: optionalString,
-  // Validated by evaluateDashboardAuth (required in production; see getDashboardAuth).
+  // Validated by evaluateDashboardAuth (required in every mode; see getDashboardAuth).
   // Kept lenient here so a bad value fails closed with a clear 503, not a crash.
   DASHBOARD_BASIC_AUTH_USER: z.preprocess(emptyToUndefined, z.string().optional()),
   DASHBOARD_BASIC_AUTH_PASSWORD: z.preprocess(emptyToUndefined, z.string().optional()),
+  /** Local-development opt-in to run without a password: only "1", only with `next dev`. */
+  DASHBOARD_AUTH_DISABLED: z.preprocess(emptyToUndefined, z.string().optional()),
 
   LIVE_EXECUTION_ENABLED: booleanFlag(false),
   BUDGET_MAX_INCREASE_PERCENT: positiveNumber(50, 1000),
@@ -126,7 +128,8 @@ export function getDashboardAuth(env: ServerEnv = getEnv()): DashboardAuth {
   return evaluateDashboardAuth({
     user: env.DASHBOARD_BASIC_AUTH_USER,
     password: env.DASHBOARD_BASIC_AUTH_PASSWORD,
-    production: env.NODE_ENV === "production",
+    disableFlag: env.DASHBOARD_AUTH_DISABLED,
+    development: env.NODE_ENV === "development",
   });
 }
 

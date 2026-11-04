@@ -3,7 +3,8 @@
  *
  *   # server started WITH valid DASHBOARD_BASIC_AUTH_USER / _PASSWORD:
  *   BASE_URL=http://localhost:3000 BASIC_AUTH=user:password npm run test:auth-gate
- *   # server started WITHOUT them (or with an invalid password) — must fail closed:
+ *   # server started WITHOUT them (or with an invalid password, or with NODE_ENV=test,
+ *   # or with DASHBOARD_AUTH_DISABLED outside `next dev`) — must fail closed:
  *   BASE_URL=http://localhost:3000 EXPECT=fail-closed npm run test:auth-gate
  *
  * Without credentials: every page, every dotted variant of a page path (the
@@ -42,6 +43,10 @@ const protectedPathsForAllModes = [
   "/en.rsc",
   "/api/integrations/shopify/callback",
   "/api/unknown",
+  // Look-alikes of the public files must not skip the gate.
+  "/icons/x",
+  "/icons/other.png",
+  "/xx/manifest.webmanifest",
 ];
 
 if (FAIL_CLOSED) {
@@ -86,9 +91,15 @@ const protectedPaths = [
   "/api/integrations/shopify/callback?state=x&shop=a.myshopify.com",
   "/api/unknown",
   "/robots.txt",
+  // Look-alikes of the public files (only the exact files are excluded from the proxy).
+  "/icons/x",
+  "/icons/other.png",
+  "/icons/icon-192.png/x",
+  "/xx/manifest.webmanifest",
+  "/api/health/x",
 ];
 for (const path of protectedPaths) await expectStatus("no credentials:", path, 401);
-for (const path of ["/en/a.b", "/en/settings", "/en/settings.x"]) {
+for (const path of ["/en/a.b", "/en/settings", "/en/settings.x", "/icons/x"]) {
   await expectStatus("no credentials (server action):", path, 401, {
     method: "POST",
     headers: { "next-action": "0".repeat(42), "content-type": "text/plain;charset=UTF-8" },
@@ -118,6 +129,15 @@ const publicPaths = [
   "/apple-icon.png",
   ...(staticAsset ? [staticAsset] : []),
 ];
+// Every icon the manifests name must stay reachable without credentials (installability).
+for (const lang of ["en", "ar"]) {
+  const manifest = await (await fetch(`${BASE}/${lang}/manifest.webmanifest`)).json().catch(() => ({}));
+  checks++;
+  if (!manifest.icons?.length) failures.push(`/${lang}/manifest.webmanifest lists no icons`);
+  for (const icon of [...(manifest.icons ?? []), ...(manifest.shortcuts ?? []).flatMap((s) => s.icons ?? [])]) {
+    if (!publicPaths.includes(icon.src)) publicPaths.push(icon.src);
+  }
+}
 for (const path of publicPaths) {
   const res = await expectStatus("public:", path, 200);
   if (path === "/api/health") {

@@ -26,8 +26,6 @@ export function createMemoryStore(seed: DemoData, idPrefix = "mem"): DataStore {
     audit: structuredClone(seed.audit),
     connections: [] as IntegrationConnection[],
   };
-  /** Per-row lock chain so concurrent withLock() calls on one connection run one after another. */
-  const connectionLocks = new Map<string, Promise<void>>();
   let counter = 0;
   const newId = (kind: string) => `${idPrefix}_${kind}_${Date.now().toString(36)}_${(counter++).toString(36)}`;
   const clone = <T>(value: T): T => structuredClone(value);
@@ -199,6 +197,8 @@ export function createMemoryStore(seed: DemoData, idPrefix = "mem"): DataStore {
         connectedAt: input.connectedAt,
         lastSyncedAt: input.lastSyncedAt,
         lastError: null,
+        refreshLeaseId: null,
+        refreshLeaseUntil: null,
         updatedAt: now,
       };
       const existing = state.connections.find(
@@ -229,19 +229,31 @@ export function createMemoryStore(seed: DemoData, idPrefix = "mem"): DataStore {
       Object.assign(found, clone(patch), { updatedAt: new Date() });
       return clone(found);
     },
-    async withLock(workspaceId, id, fn) {
-      const previous = connectionLocks.get(id) ?? Promise.resolve();
-      let release!: () => void;
-      const mine = previous.then(() => new Promise<void>((resolve) => (release = resolve)));
-      connectionLocks.set(id, mine);
-      await previous;
-      try {
-        const found = state.connections.find((c) => c.workspaceId === workspaceId && c.id === id);
-        return await fn(found ? clone(found) : null, connections);
-      } finally {
-        release();
-        if (connectionLocks.get(id) === mine) connectionLocks.delete(id);
-      }
+    async get(workspaceId, id) {
+      const found = state.connections.find((c) => c.workspaceId === workspaceId && c.id === id);
+      return found ? clone(found) : null;
+    },
+    async updateIfStatus(workspaceId, id, status, patch) {
+      assertCiphertext(patch.encryptedCredentials);
+      const found = state.connections.find((c) => c.workspaceId === workspaceId && c.id === id && c.status === status);
+      if (!found) return null;
+      Object.assign(found, clone(patch), { updatedAt: new Date() });
+      return clone(found);
+    },
+    // Check-and-set runs synchronously (no await in between), so it is atomic here.
+    async acquireRefreshLease(workspaceId, id, leaseId, now, until) {
+      const found = state.connections.find((c) => c.workspaceId === workspaceId && c.id === id);
+      if (!found || found.status !== "CONNECTED") return false;
+      if (found.refreshLeaseUntil && found.refreshLeaseUntil.getTime() >= now.getTime()) return false;
+      Object.assign(found, { refreshLeaseId: leaseId, refreshLeaseUntil: until, updatedAt: new Date() });
+      return true;
+    },
+    async completeRefreshLease(workspaceId, id, leaseId, patch) {
+      assertCiphertext(patch.encryptedCredentials);
+      const found = state.connections.find((c) => c.workspaceId === workspaceId && c.id === id);
+      if (!found || found.refreshLeaseId !== leaseId || found.status !== "CONNECTED") return null;
+      Object.assign(found, clone(patch), { refreshLeaseId: null, refreshLeaseUntil: null, updatedAt: new Date() });
+      return clone(found);
     },
   };
 

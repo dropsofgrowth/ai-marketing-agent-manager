@@ -5,6 +5,9 @@
  *   src/app/apple-icon.png (180×180)          — iOS home screen (full-bleed; iOS rounds it)
  *   public/offline.html                       — bilingual page the service worker shows offline
  *
+ * New file names under public/icons/ must also be added to the proxy matcher in
+ * src/proxy.ts (it excludes the icons by exact name; src/proxy.test.ts checks it).
+ *
  * Run after changing the logo or the `offline` dictionary strings:
  *   npm run pwa:assets
  * The outputs are committed, so builds and deployments don't need this script.

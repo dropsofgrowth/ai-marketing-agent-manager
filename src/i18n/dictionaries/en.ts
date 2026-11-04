@@ -470,7 +470,7 @@ export const en = {
     configured: "Configured",
     notConfigured: "Not configured",
     authNotice:
-      "There is no per-user sign-in yet: everyone with the dashboard password acts as the owner. The password is required in production (the dashboard refuses to run without it) and for live Shopify data.",
+      "There is no per-user sign-in yet: everyone with the dashboard password acts as the owner. The password is required (the dashboard refuses to run without it — only local development can opt out) and for live Shopify data.",
     workspace: "Workspace",
     workspaceName: "Name",
     currency: "Currency",

@@ -2,15 +2,18 @@
  * Dashboard access (HTTP Basic Auth) — shared by the proxy and the server-side
  * guard. Pure and runtime-agnostic (Web Crypto only): no env reads, no Next.js APIs.
  *
- * Policy (fail closed):
- * - production: DASHBOARD_BASIC_AUTH_USER and DASHBOARD_BASIC_AUTH_PASSWORD are
- *   REQUIRED and must be valid; otherwise every request is refused.
- * - development/test: may run without them ("open"), but only when BOTH are unset —
- *   a half or invalid configuration is refused there too. Live store data
- *   additionally requires credentials in every environment (see Shopify readiness).
+ * Policy (fail closed, independent of how the server was started):
+ * - DASHBOARD_BASIC_AUTH_USER and DASHBOARD_BASIC_AUTH_PASSWORD are REQUIRED and must
+ *   be valid; otherwise every request is refused — in production, test, or any other mode.
+ * - The only way to run without them ("open") is an explicit opt-in for local work:
+ *   DASHBOARD_AUTH_DISABLED=1 together with NODE_ENV=development (`next dev`) and no
+ *   credentials configured. The flag anywhere else — or with another value — is itself
+ *   a misconfiguration and refuses every request. Live store data additionally requires
+ *   credentials even in open mode (see Shopify readiness).
  */
 
 export const DASHBOARD_AUTH_VARS = ["DASHBOARD_BASIC_AUTH_USER", "DASHBOARD_BASIC_AUTH_PASSWORD"] as const;
+export const DASHBOARD_AUTH_DISABLED_VAR = "DASHBOARD_AUTH_DISABLED";
 export const MIN_PASSWORD_LENGTH = 12;
 const MAX_LENGTH = 256;
 
@@ -20,11 +23,13 @@ export type DashboardAuthProblem =
   /** Empty, too long, contains ":" (the Basic Auth separator) or control characters. */
   | "invalid_user"
   | "password_too_short"
-  | "invalid_password";
+  | "invalid_password"
+  /** DASHBOARD_AUTH_DISABLED set outside `next dev`, or to anything but "1". */
+  | "disable_flag_not_allowed";
 
 export type DashboardAuth =
   | { mode: "required"; user: string; password: string }
-  /** Development/test only, with no credentials configured at all. */
+  /** Explicit DASHBOARD_AUTH_DISABLED=1 under `next dev`, with no credentials configured. */
   | { mode: "open" }
   | { mode: "misconfigured"; problems: DashboardAuthProblem[] };
 
@@ -34,12 +39,19 @@ const blank = (value: string | undefined) => value === undefined || value.trim()
 export function evaluateDashboardAuth(input: {
   user: string | undefined;
   password: string | undefined;
-  production: boolean;
+  /** Raw DASHBOARD_AUTH_DISABLED value (undefined when unset or empty). */
+  disableFlag: string | undefined;
+  /** True only for NODE_ENV=development. */
+  development: boolean;
 }): DashboardAuth {
-  const { user, password, production } = input;
-  if (blank(user) && blank(password)) {
-    return production ? { mode: "misconfigured", problems: ["missing_user", "missing_password"] } : { mode: "open" };
+  const { user, password, disableFlag, development } = input;
+  const noCredentials = blank(user) && blank(password);
+  if (!blank(disableFlag)) {
+    if (!development || disableFlag!.trim() !== "1") return { mode: "misconfigured", problems: ["disable_flag_not_allowed"] };
+    // Configured credentials always apply; the flag only lets a bare local checkout run.
+    if (noCredentials) return { mode: "open" };
   }
+  if (noCredentials) return { mode: "misconfigured", problems: ["missing_user", "missing_password"] };
 
   const problems: DashboardAuthProblem[] = [];
   if (blank(user)) problems.push("missing_user");
@@ -65,9 +77,14 @@ export function describeAuthProblems(problems: readonly DashboardAuthProblem[]):
         return `DASHBOARD_BASIC_AUTH_PASSWORD must be at least ${MIN_PASSWORD_LENGTH} characters`;
       case "invalid_password":
         return `DASHBOARD_BASIC_AUTH_PASSWORD must be ${MIN_PASSWORD_LENGTH}–${MAX_LENGTH} printable characters`;
+      case "disable_flag_not_allowed":
+        return "DASHBOARD_AUTH_DISABLED is only allowed as DASHBOARD_AUTH_DISABLED=1 with `next dev` (NODE_ENV=development) — remove it";
     }
   });
-  return `Dashboard access is not configured: ${parts.join("; ")}.`;
+  const hint = problems.includes("missing_user") && problems.includes("missing_password")
+    ? " (for local development only, `next dev` can run without them with DASHBOARD_AUTH_DISABLED=1)"
+    : "";
+  return `Dashboard access is not configured: ${parts.join("; ")}${hint}.`;
 }
 
 async function digest(value: string): Promise<Uint8Array> {

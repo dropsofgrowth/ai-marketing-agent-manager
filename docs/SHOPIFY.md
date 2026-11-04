@@ -34,8 +34,14 @@ works **either way**, so nothing depends on the answer.
 - the **access token** lasts 1 hour and is refreshed automatically 5 minutes before expiry;
 - the **refresh token** lasts 90 days and **rotates** — every refresh returns a new one
   and invalidates the old one, so it is saved before the new access token is used;
-- refreshes run under a database row lock (`SELECT … FOR UPDATE`), so two servers can
-  never spend the same refresh token;
+- one refresh at a time: requests in the same server share it, and across servers a
+  short **refresh lease** on the connection row (claimed and released with single
+  conditional `UPDATE`s — no transaction or row lock is held while Shopify is called)
+  decides who refreshes; the others wait for the rotated token. The rotated token is
+  saved with a compare-and-swap on that lease (retried on a transient database error),
+  so it is never lost or written onto a store that was disconnected meanwhile;
+- the scopes Shopify returns on every refresh are checked again: if a `write_*` scope
+  ever appears, the token is discarded and the store must be reconnected;
 - if Shopify rejects the refresh token (expired, or the app was uninstalled), the stored
   credentials are wiped and the dashboard shows **"Reconnect Shopify"** — it never falls
   back to demo data once a store has been connected.
@@ -60,7 +66,7 @@ them into chat, an issue or a pull request, and never commit them.
 | `APP_URL` | No | The dashboard's public **https** address (no trailing path). | `https://agent.dropsofgrowth.com` |
 | `DATABASE_URL` | **Yes** | Your PostgreSQL provider (e.g. Neon). Tokens are stored here, encrypted. | — |
 | `CREDENTIALS_ENCRYPTION_KEY` | **Yes** | Generate once: `openssl rand -base64 32`. Losing it means reconnecting Shopify. | — |
-| `DASHBOARD_BASIC_AUTH_USER` / `_PASSWORD` | **Yes** (password) | **Required**: production refuses all requests without them, and Shopify won't connect or show live data without them in any environment. Password ≥ 12 characters. | — |
+| `DASHBOARD_BASIC_AUTH_USER` / `_PASSWORD` | **Yes** (password) | **Required**: the server refuses all requests without them (whatever `NODE_ENV` is), and Shopify won't connect or show live data without them in any environment — not even in the local `DASHBOARD_AUTH_DISABLED=1` mode. Password ≥ 12 characters. | — |
 
 The Settings page shows which of these are **missing by name** (never their values).
 
@@ -128,14 +134,20 @@ well inside Shopify's rate limits; each page view reads at most 20 pages of orde
   signed state cookie + `state` match, Shopify HMAC (client secret, constant-time),
   timestamp freshness, shop = `SHOPIFY_STORE_DOMAIN`. The token is then tested against
   the store and its scopes checked before it is saved.
-- **Storage:** AES-256-GCM, bound to the workspace + store; PostgreSQL CHECK constraints
-  reject anything that isn't ciphertext and keep at most one current connection.
+- **Storage:** AES-256-GCM (full 16-byte tag and 12-byte IV enforced on decryption), bound
+  to the workspace + store; PostgreSQL CHECK constraints reject anything that isn't
+  ciphertext and keep at most one current connection. The CHECK is the last line of
+  defence — the app refuses plaintext before it reaches the database — and if it ever
+  fires, PostgreSQL writes the rejected row into its own error log ("Failing row
+  contains …"). So never write to `integration_connections` by hand, and treat the
+  database server log as sensitive.
 - **Logging:** structured events with codes, operation names and Shopify request ids.
   Token-shaped strings and secret-named fields are stripped (`src/server/logging.ts`).
 - **Read-only:** `assertReadOnlyDocument` blocks `mutation`/`subscription`; tokens with
-  `write_*` scopes are refused at connect and revoked on verify.
-- **Access (fail closed):** the dashboard password is mandatory in production and for live
-  store data everywhere. It is checked in the proxy for every page, server action and API
+  `write_*` scopes are refused at connect, discarded on refresh and revoked on verify.
+- **Access (fail closed):** the dashboard password is mandatory however the server is
+  started (the only exception is `DASHBOARD_AUTH_DISABLED=1` with `npm run dev`, for local
+  demo data) and for live store data everywhere. It is checked in the proxy for every page, server action and API
   route (incl. the OAuth callback), and **again server-side** in `getCurrentActor()`, so a
   request that slips past the proxy still gets no identity and no data. Connect, verify and
   disconnect also require the owner/admin role. `npm run test:auth-gate` checks both the

@@ -23,6 +23,7 @@ function configure(env: Record<string, string>) {
   vi.stubEnv("DATABASE_URL", "");
   vi.stubEnv("DASHBOARD_BASIC_AUTH_USER", "");
   vi.stubEnv("DASHBOARD_BASIC_AUTH_PASSWORD", "");
+  vi.stubEnv("DASHBOARD_AUTH_DISABLED", "");
   for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
   resetEnvCacheForTests();
 }
@@ -66,10 +67,26 @@ describe("server-side dashboard access", () => {
     await expect(getCurrentActor()).resolves.toMatchObject({ role: "OWNER" });
   });
 
-  it("is open in development only without any credentials configured", async () => {
-    configure({ NODE_ENV: "development" });
+  it("fails closed without credentials whatever NODE_ENV is (e.g. a build started with NODE_ENV=test)", async () => {
+    for (const NODE_ENV of ["test", "development", "production"]) {
+      configure({ NODE_ENV });
+      await expectCode(getCurrentActor(), "DASHBOARD_ACCESS_NOT_CONFIGURED");
+    }
+    configure({ NODE_ENV: "production", DASHBOARD_AUTH_DISABLED: "1" });
+    await expectCode(getCurrentActor(), "DASHBOARD_ACCESS_NOT_CONFIGURED");
+    configure({ NODE_ENV: "test", DASHBOARD_AUTH_DISABLED: "1" });
+    await expectCode(getCurrentActor(), "DASHBOARD_ACCESS_NOT_CONFIGURED");
+  });
+
+  it("is open only with DASHBOARD_AUTH_DISABLED=1 under `next dev`, and credentials still apply when set", async () => {
+    configure({ NODE_ENV: "development", DASHBOARD_AUTH_DISABLED: "1" });
     await expect(getCurrentActor()).resolves.toMatchObject({ role: "OWNER" });
-    configure({ NODE_ENV: "development", DASHBOARD_BASIC_AUTH_USER: USER, DASHBOARD_BASIC_AUTH_PASSWORD: PASSWORD });
+    configure({
+      NODE_ENV: "development",
+      DASHBOARD_AUTH_DISABLED: "1",
+      DASHBOARD_BASIC_AUTH_USER: USER,
+      DASHBOARD_BASIC_AUTH_PASSWORD: PASSWORD,
+    });
     await expectCode(getCurrentActor(), "UNAUTHENTICATED");
   });
 });

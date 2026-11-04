@@ -52,7 +52,8 @@ describe("Shopify readiness", () => {
     const expected = { ready: false, reason: "auth_required", missing: ["DASHBOARD_BASIC_AUTH_USER", "DASHBOARD_BASIC_AUTH_PASSWORD"] };
     const noAuth = { ...base, DASHBOARD_BASIC_AUTH_USER: undefined, DASHBOARD_BASIC_AUTH_PASSWORD: undefined };
     expect(getShopifyReadiness(noAuth, "postgres")).toEqual(expected);
-    expect(getShopifyReadiness({ ...noAuth, NODE_ENV: "development" }, "postgres")).toEqual(expected); // dev "open" mode too
+    const openDev = { ...noAuth, NODE_ENV: "development", DASHBOARD_AUTH_DISABLED: "1" } as ServerEnv;
+    expect(getShopifyReadiness(openDev, "postgres")).toEqual(expected); // the local "open" opt-in too
     expect(getShopifyReadiness({ ...base, DASHBOARD_BASIC_AUTH_PASSWORD: "short" }, "postgres")).toEqual(expected);
   });
 

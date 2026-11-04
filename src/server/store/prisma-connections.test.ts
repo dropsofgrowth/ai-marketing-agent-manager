@@ -1,6 +1,6 @@
 /**
- * Integration test for the PostgreSQL connection repository (row lock, revoke on
- * reconnect, safety constraints). Runs only when TEST_DATABASE_URL points at a
+ * Integration test for the PostgreSQL connection repository (refresh lease,
+ * conditional updates, revoke on reconnect, safety constraints). Runs only when TEST_DATABASE_URL points at a
  * migrated, disposable database:
  *
  *   TEST_DATABASE_URL=postgresql://… npx vitest run src/server/store/prisma-connections.test.ts
@@ -16,6 +16,8 @@ import type { DataStore, SaveConnectionInput } from "./types";
 const url = process.env.TEST_DATABASE_URL;
 const WS = "ws_conn_test";
 const CIPHER = "v1.aaaa.bbbb.cccc";
+/** Deliberately not ciphertext (and not token-shaped, so secret scanners stay quiet). */
+const PLAINTEXT = "plaintext-credentials-not-encrypted";
 
 describe.skipIf(!url)("PostgreSQL connection repository", () => {
   let prisma: PrismaClient;
@@ -64,30 +66,68 @@ describe.skipIf(!url)("PostgreSQL connection repository", () => {
     expect(revoked).toMatchObject({ status: "REVOKED", encryptedCredentials: null, accessTokenExpiresAt: null });
   });
 
-  it("serializes withLock() across concurrent callers (SELECT … FOR UPDATE)", async () => {
+  it("grants the refresh lease to exactly one of many concurrent callers", async () => {
     const saved = await store.connections.saveConnected(input());
-    const order: string[] = [];
-    const slow = store.connections.withLock(WS, saved.id, async (current, tx) => {
-      order.push("A:start");
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      await tx.update(WS, saved.id, { encryptedCredentials: "v1.new.cipher.text" });
-      order.push("A:end");
+    const now = new Date("2026-11-04T10:58:00Z");
+    const until = new Date(now.getTime() + 60_000);
+    const results = await Promise.all(
+      Array.from({ length: 12 }, (_, i) => store.connections.acquireRefreshLease(WS, saved.id, `lease-${i}`, now, until)),
+    );
+    expect(results.filter(Boolean)).toHaveLength(1);
+    const winner = `lease-${results.indexOf(true)}`;
+    expect(await store.connections.get(WS, saved.id)).toMatchObject({ refreshLeaseId: winner, refreshLeaseUntil: until });
+
+    // Only the holder can complete it; completing releases it.
+    expect(await store.connections.completeRefreshLease(WS, saved.id, "someone-else", { lastError: "X" })).toBeNull();
+    const done = await store.connections.completeRefreshLease(WS, saved.id, winner, { encryptedCredentials: "v1.new.cipher.text" });
+    expect(done).toMatchObject({ encryptedCredentials: "v1.new.cipher.text", refreshLeaseId: null, refreshLeaseUntil: null });
+    expect(await store.connections.acquireRefreshLease(WS, saved.id, "next", now, until)).toBe(true);
+  });
+
+  it("lets an expired lease be taken over, and the late holder can no longer write", async () => {
+    const saved = await store.connections.saveConnected(input());
+    const t0 = new Date("2026-11-04T10:58:00Z");
+    expect(await store.connections.acquireRefreshLease(WS, saved.id, "crashed", t0, new Date(t0.getTime() + 60_000))).toBe(true);
+    expect(await store.connections.acquireRefreshLease(WS, saved.id, "early", new Date(t0.getTime() + 30_000), new Date(t0.getTime() + 90_000))).toBe(false);
+    const later = new Date(t0.getTime() + 61_000);
+    expect(await store.connections.acquireRefreshLease(WS, saved.id, "takeover", later, new Date(later.getTime() + 60_000))).toBe(true);
+    expect(await store.connections.completeRefreshLease(WS, saved.id, "crashed", { encryptedCredentials: "v1.stale.cipher.text" })).toBeNull();
+    expect((await store.connections.get(WS, saved.id))?.encryptedCredentials).toBe(CIPHER);
+  });
+
+  it("never completes a lease on a connection that was disconnected or flagged meanwhile", async () => {
+    const saved = await store.connections.saveConnected(input());
+    const now = new Date("2026-11-04T10:58:00Z");
+    expect(await store.connections.acquireRefreshLease(WS, saved.id, "L", now, new Date(now.getTime() + 60_000))).toBe(true);
+    await store.connections.update(WS, saved.id, {
+      status: "REVOKED",
+      encryptedCredentials: null,
+      credentialsKeyVersion: null,
+      accessTokenExpiresAt: null,
+      refreshTokenExpiresAt: null,
     });
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    const second = store.connections.withLock(WS, saved.id, async (current) => {
-      order.push("B:start");
-      return current?.encryptedCredentials;
-    });
-    const [, seenByB] = await Promise.all([slow, second]);
-    expect(order).toEqual(["A:start", "A:end", "B:start"]);
-    expect(seenByB).toBe("v1.new.cipher.text"); // B re-read the row after A committed
+    expect(await store.connections.completeRefreshLease(WS, saved.id, "L", { encryptedCredentials: "v1.late.cipher.text" })).toBeNull();
+    expect(await store.connections.get(WS, saved.id)).toMatchObject({ status: "REVOKED", encryptedCredentials: null });
+    expect(await store.connections.acquireRefreshLease(WS, saved.id, "M", now, new Date(now.getTime() + 60_000))).toBe(false);
+  });
+
+  it("applies a conditional status change for exactly one concurrent caller", async () => {
+    const saved = await store.connections.saveConnected(input());
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        store.connections.updateIfStatus(WS, saved.id, "CONNECTED", { status: "ERROR", lastError: "SHOPIFY_RECONNECT_REQUIRED" }),
+      ),
+    );
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(await store.connections.get(WS, saved.id)).toMatchObject({ status: "ERROR", lastError: "SHOPIFY_RECONNECT_REQUIRED" });
+    expect(await store.connections.get("other-workspace", saved.id)).toBeNull(); // tenant-scoped
   });
 
   it("refuses plaintext credentials in code and in the database", async () => {
-    await expect(store.connections.saveConnected(input({ encryptedCredentials: "shpat_plaintext" }))).rejects.toThrow(/not encrypted/);
+    await expect(store.connections.saveConnected(input({ encryptedCredentials: PLAINTEXT }))).rejects.toThrow(/not encrypted/);
     await expect(
       prisma.integrationConnection.create({
-        data: { workspaceId: WS, provider: "SHOPIFY", status: "CONNECTED", encryptedCredentials: "shpat_plaintext" },
+        data: { workspaceId: WS, provider: "SHOPIFY", status: "CONNECTED", encryptedCredentials: PLAINTEXT },
       }),
     ).rejects.toThrow();
     await expect(

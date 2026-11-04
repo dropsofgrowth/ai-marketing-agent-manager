@@ -48,7 +48,10 @@ Limits of a shared password (until per-user sign-in exists):
   guesses, so add rate limiting at the platform if you can (e.g. a Vercel Firewall rule
   for repeated 401s).
 - **HTTPS only** — Basic Auth sends the password with every request; Vercel, Render and
-  the tunnel below all use HTTPS.
+  the tunnel below all use HTTPS, and the app sends `Strict-Transport-Security` so
+  browsers refuse plain HTTP to it afterwards.
+- **Never set `DASHBOARD_AUTH_DISABLED`** in a deployment — it is only for `npm run dev`
+  on your own computer, and a deployed server with it set refuses every request (503).
 - **Everyone with the password acts as the owner**, and the audit log can't tell people
   apart. Share it only with people who may approve changes; rotate it when someone leaves.
 

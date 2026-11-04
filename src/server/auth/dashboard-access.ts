@@ -26,7 +26,7 @@ export async function requireDashboardAccess(): Promise<void> {
     throw new DomainError("DASHBOARD_ACCESS_NOT_CONFIGURED");
   }
   if (auth.mode === "misconfigured") throw new DomainError("DASHBOARD_ACCESS_NOT_CONFIGURED");
-  if (auth.mode === "open") return; // development/test with no credentials configured at all
+  if (auth.mode === "open") return; // explicit DASHBOARD_AUTH_DISABLED=1 under `next dev` only
 
   const authorization = (await headers()).get("authorization");
   if (!(await verifyBasicAuthHeader(authorization, auth))) throw new DomainError("UNAUTHENTICATED");

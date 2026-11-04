@@ -3,9 +3,9 @@ import { buildManifest } from "@/lib/pwa/manifest";
 
 /**
  * Localized web app manifest: /en/manifest.webmanifest and /ar/manifest.webmanifest.
- * Prerendered at build time. Paths containing a "." are outside the proxy matcher,
- * so the manifest stays reachable when Basic Auth protects the pages (browsers
- * fetch manifests without credentials).
+ * Prerendered at build time. These two exact paths are excluded from the proxy
+ * matcher (src/proxy.ts), so the manifest stays reachable when Basic Auth protects
+ * the pages — browsers fetch manifests without credentials. It holds no data.
  */
 export function generateStaticParams() {
   return LOCALES.map((lang) => ({ lang }));

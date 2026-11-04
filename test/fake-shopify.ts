@@ -59,6 +59,8 @@ export function createFakeShopify(options: {
     /** Respond to the next token request with this instead. */
     tokenOverrides: [] as (() => Response)[],
     issueExpiring: true,
+    /** Delay every refresh-token request by this long (concurrency tests). */
+    refreshDelayMs: 0,
     counter: 0,
   };
 
@@ -189,6 +191,7 @@ export function createFakeShopify(options: {
         return json(401, { error: "invalid_client" });
       }
       if (body.get("grant_type") === "refresh_token") {
+        if (state.refreshDelayMs) await new Promise((resolve) => setTimeout(resolve, state.refreshDelayMs));
         const refresh = body.get("refresh_token") ?? "";
         if (!state.refreshTokens.has(refresh)) return json(401, { error: "invalid_request" });
         state.refreshTokens.delete(refresh); // rotation: the old refresh token is now invalid

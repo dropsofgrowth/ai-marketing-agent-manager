@@ -189,6 +189,11 @@ model IntegrationConnection {
   lastSyncedAt          DateTime?           @map("last_synced_at")
   /// Short error code only (e.g. SHOPIFY_RECONNECT_REQUIRED) — never a raw provider message.
   lastError             String?             @map("last_error")
+  /// Token-refresh lease: the server instance currently refreshing (rotating) the token.
+  /// Claimed and released with single conditional UPDATEs — no transaction is held
+  /// while Shopify is called.
+  refreshLeaseId        String?             @map("refresh_lease_id")
+  refreshLeaseUntil     DateTime?           @map("refresh_lease_until")
   createdAt             DateTime            @default(now()) @map("created_at")
   updatedAt             DateTime            @updatedAt @map("updated_at")
 

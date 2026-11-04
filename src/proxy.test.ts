@@ -1,7 +1,9 @@
 import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { proxy } from "@/proxy";
+import { LOCALES } from "@/i18n/config";
+import { buildManifest } from "@/lib/pwa/manifest";
+import { config as proxyConfig, proxy } from "@/proxy";
 import { resetEnvCacheForTests } from "@/server/env";
 
 const USER = "owner";
@@ -13,6 +15,7 @@ function configure(env: Record<string, string | undefined>) {
   vi.unstubAllEnvs();
   vi.stubEnv("DASHBOARD_BASIC_AUTH_USER", "");
   vi.stubEnv("DASHBOARD_BASIC_AUTH_PASSWORD", "");
+  vi.stubEnv("DASHBOARD_AUTH_DISABLED", "");
   vi.stubEnv("DATABASE_URL", "");
   for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value ?? "");
   resetEnvCacheForTests();
@@ -93,15 +96,58 @@ describe("proxy: credentials configured", () => {
   });
 });
 
-describe("proxy: development", () => {
-  it("runs open only when no credentials are configured at all", async () => {
-    configure({ NODE_ENV: "development" });
+describe("proxy: fail closed regardless of NODE_ENV", () => {
+  it.each(["test", "development"])("NODE_ENV=%s without credentials → 503", async (NODE_ENV) => {
+    configure({ NODE_ENV });
+    for (const path of PROTECTED) expect((await run(path)).status, path).toBe(503);
+  });
+
+  it("refuses DASHBOARD_AUTH_DISABLED outside `next dev`, even with valid credentials", async () => {
+    for (const NODE_ENV of ["production", "test"]) {
+      configure({ NODE_ENV, DASHBOARD_AUTH_DISABLED: "1", DASHBOARD_BASIC_AUTH_USER: USER, DASHBOARD_BASIC_AUTH_PASSWORD: PASSWORD });
+      const res = await run("/en/settings", { headers: { authorization: authHeader() } });
+      expect(res.status).toBe(503);
+      expect(await res.text()).toContain("DASHBOARD_AUTH_DISABLED");
+    }
+  });
+
+  it("runs open only with the explicit local opt-in, and never for a half configuration", async () => {
+    configure({ NODE_ENV: "development", DASHBOARD_AUTH_DISABLED: "1" });
     expect(passedThrough(await run("/en/settings"))).toBe(true);
 
-    configure({ NODE_ENV: "development", DASHBOARD_BASIC_AUTH_USER: USER });
+    configure({ NODE_ENV: "development", DASHBOARD_AUTH_DISABLED: "1", DASHBOARD_BASIC_AUTH_USER: USER });
     expect((await run("/en/settings")).status).toBe(503);
 
     configure({ NODE_ENV: "development", DASHBOARD_BASIC_AUTH_USER: USER, DASHBOARD_BASIC_AUTH_PASSWORD: PASSWORD });
     expect((await run("/en/settings")).status).toBe(401);
+  });
+});
+
+describe("proxy matcher", () => {
+  // Next compiles the matcher source into an anchored regular expression.
+  const matcher = new RegExp(`^${proxyConfig.matcher[0]}$`);
+
+  it("skips only the exact public, data-free files — including every icon the manifest names", () => {
+    const icons = LOCALES.flatMap((lang) => buildManifest(lang).icons ?? []).map((icon) => icon.src);
+    expect(icons.length).toBeGreaterThan(0);
+    const publicPaths = [...new Set(icons), ...LOCALES.map((l) => `/${l}/manifest.webmanifest`), "/sw.js", "/offline.html", "/icon.svg", "/apple-icon.png", "/api/health", "/_next/static/chunks/a.js"];
+    for (const path of publicPaths) expect(matcher.test(path), path).toBe(false);
+  });
+
+  it("runs on everything else, including look-alikes of the public files", () => {
+    for (const path of [
+      "/",
+      "/en/settings",
+      "/icons/x",
+      "/icons/other.png",
+      "/icons/icon-192.png/x",
+      "/xx/manifest.webmanifest",
+      "/en/manifest.webmanifest/x",
+      "/api/health/x",
+      "/sw.js.map",
+      "/en/a.b",
+    ]) {
+      expect(matcher.test(path), path).toBe(true);
+    }
   });
 });

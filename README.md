@@ -42,6 +42,7 @@ Requires **Node.js ≥ 20.19** (22 LTS recommended) and npm.
 git clone <this repo> && cd ai-marketing-agent
 npm install                # also runs `prisma generate`
 cp .env.example .env       # all values may stay empty for a demo
+echo "DASHBOARD_AUTH_DISABLED=1" > .env.development.local   # local `next dev` only: no password
 npm run dev
 ```
 
@@ -92,7 +93,9 @@ For a shared preview deployment:
 - Set `DASHBOARD_BASIC_AUTH_USER` and `DASHBOARD_BASIC_AUTH_PASSWORD` (password ≥ 12 characters) —
   **required**: a production build answers every request with 503 until they are set and valid.
   Every page, server action and API route then requires them (there is **no per-user sign-in yet**;
-  everyone with the password acts as the demo owner). `npm run dev` runs without them for local work.
+  everyone with the password acts as the demo owner). This holds however the server is started
+  (a build run with `NODE_ENV=test` is refused too); the only way to run without them is
+  `DASHBOARD_AUTH_DISABLED=1` with `npm run dev`, kept in `.env.development.local`.
 - Use `npm run db:deploy` (not `db:migrate`) to apply migrations in non-development environments.
 - `/api/health` stays public for load-balancer checks and reveals no configuration.
 
@@ -134,7 +137,8 @@ See [`.env.example`](.env.example) for the full, commented template. Never commi
 | --- | --- | --- |
 | `DATABASE_URL` | No | PostgreSQL URL. Empty → in-memory demo store. |
 | `CREDENTIALS_ENCRYPTION_KEY` | For storing credentials | 32-byte base64 key (`openssl rand -base64 32`). |
-| `DASHBOARD_BASIC_AUTH_USER` / `_PASSWORD` | **Yes, in production** | Dashboard password (HTTP Basic Auth), password ≥ 12 characters. Missing/invalid → every request gets 503 (fail closed). Also required for live Shopify data in any environment. |
+| `DASHBOARD_BASIC_AUTH_USER` / `_PASSWORD` | **Yes** | Dashboard password (HTTP Basic Auth), password ≥ 12 characters. Missing/invalid → every request gets 503 (fail closed), whatever `NODE_ENV` is. Also required for live Shopify data. |
+| `DASHBOARD_AUTH_DISABLED` | No (local only) | `1` lets `npm run dev` run without the password (put it in `.env.development.local`). Set anywhere else — or to another value — it makes every request fail with 503. |
 | `DEFAULT_LOCALE` | No | `en` (default) or `ar`. |
 | `LIVE_EXECUTION_ENABLED` | No | Keep `false`. No live adapters exist; if `true`, runs are still simulated and flagged. |
 | `BUDGET_MAX_INCREASE_PERCENT` / `_DECREASE_PERCENT` | No | Per-request limits (defaults 50 / 80). |

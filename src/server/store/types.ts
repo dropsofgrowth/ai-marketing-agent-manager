@@ -85,12 +85,6 @@ export interface AuditRepository {
   list(workspaceId: string, options?: { limit?: number }): Promise<AuditLogEntry[]>;
 }
 
-/**
- * Maximum duration of a connection's row-lock transaction (token refresh happens
- * inside it). Keep it above the refresh worst case in the Shopify connection service.
- */
-export const CONNECTION_LOCK_TIMEOUT_MS = 45_000;
-
 /** Statuses that make a connection the workspace's current one for its provider. */
 export const CURRENT_CONNECTION_STATUSES: readonly ConnectionStatus[] = ["CONNECTED", "ERROR"];
 
@@ -127,6 +121,7 @@ export type ConnectionPatch = Partial<
 export interface ConnectionRepository {
   /** The current (CONNECTED or ERROR) connection for a provider, if any. */
   getCurrent(workspaceId: string, provider: IntegrationProviderId): Promise<IntegrationConnection | null>;
+  get(workspaceId: string, id: string): Promise<IntegrationConnection | null>;
   /**
    * Atomically stores a freshly authorized connection as CONNECTED. Any other
    * current connection for the same provider is revoked and its credentials wiped.
@@ -134,16 +129,34 @@ export interface ConnectionRepository {
   saveConnected(input: SaveConnectionInput): Promise<IntegrationConnection>;
   update(workspaceId: string, id: string, patch: ConnectionPatch): Promise<IntegrationConnection | null>;
   /**
-   * Runs `fn` while holding an exclusive lock on the connection row
-   * (`SELECT … FOR UPDATE` in PostgreSQL) so only one server instance refreshes a
-   * rotating token at a time. `fn` receives the row as re-read under the lock and
-   * a repository bound to the same transaction.
+   * Applies `patch` only while the row still has `status` (one conditional UPDATE).
+   * Returns the updated row, or null when another request changed it first — so
+   * exactly one caller wins a state change (and records its audit entry).
    */
-  withLock<T>(
+  updateIfStatus(
     workspaceId: string,
     id: string,
-    fn: (current: IntegrationConnection | null, tx: ConnectionRepository) => Promise<T>,
-  ): Promise<T>;
+    status: ConnectionStatus,
+    patch: ConnectionPatch,
+  ): Promise<IntegrationConnection | null>;
+  /**
+   * Claims the token-refresh lease for `leaseId` until `until`, if the connection is
+   * CONNECTED and no unexpired lease exists. One conditional UPDATE: atomic across
+   * server instances, and nothing stays locked while the caller talks to Shopify.
+   */
+  acquireRefreshLease(workspaceId: string, id: string, leaseId: string, now: Date, until: Date): Promise<boolean>;
+  /**
+   * Applies `patch` and releases the lease — only if `leaseId` still holds it AND the
+   * connection is still CONNECTED (compare-and-swap). Returns the updated row, or null
+   * if the lease was lost or the connection was disconnected/flagged meanwhile — so a
+   * refresh that finishes late can never write credentials onto a REVOKED/ERROR row.
+   */
+  completeRefreshLease(
+    workspaceId: string,
+    id: string,
+    leaseId: string,
+    patch: ConnectionPatch,
+  ): Promise<IntegrationConnection | null>;
 }
 
 /** Defense in depth (mirrors the DB CHECK): only versioned ciphertext may be stored. */

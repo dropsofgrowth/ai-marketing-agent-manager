@@ -8,8 +8,10 @@ import { log } from "@/server/logging";
 /**
  * Runs before every request except a short allow-list of public files (see `config`):
  * 1. Dashboard access (HTTP Basic Auth, DASHBOARD_BASIC_AUTH_USER/PASSWORD), FAIL
- *    CLOSED: in production, missing or invalid credentials refuse every request
- *    with 503; a missing or wrong Authorization header gets 401. Server actions
+ *    CLOSED: missing or invalid credentials refuse every request with 503 however
+ *    the server was started (the only exception is the explicit local opt-in
+ *    DASHBOARD_AUTH_DISABLED=1 under `next dev`); a missing or wrong Authorization
+ *    header gets 401. Server actions
  *    are POSTs to page routes, and API routes (incl. the Shopify OAuth callback)
  *    are covered too. This is the first layer only — `getCurrentActor()` checks the
  *    same credentials again server-side (src/server/auth/dashboard-access.ts).
@@ -73,13 +75,17 @@ export const config = {
   /*
    * Everything goes through the proxy EXCEPT these public, data-free files: Next.js
    * static assets, the health probe, and the PWA files browsers fetch without
-   * credentials (manifest, icons, service worker, offline page).
+   * credentials (the two localized manifests, the manifest's icons by exact name,
+   * service worker, offline page). Keep the exclusions exact: anything else that
+   * skips the proxy reaches the [lang]/[...rest] catch-all and then relies on the
+   * server-side check alone.
    *
-   * Do not go back to excluding "any path with a dot": the [lang]/[...rest]
+   * Do not go back to excluding "any path with a dot" or a whole directory: the
    * catch-all renders the app shell for paths like /en/x.y, so that pattern let
-   * anyone bypass Basic Auth (see e2e/auth-gate.mjs, which guards this list).
+   * anyone bypass Basic Auth. src/proxy.test.ts and e2e/auth-gate.mjs guard this
+   * list (and that every icon the manifest names stays reachable).
    */
   matcher: [
-    "/((?!_next/static/|_next/image|api/health$|icons/|sw\\.js$|offline\\.html$|icon\\.svg$|apple-icon\\.png$|[a-z]{2}/manifest\\.webmanifest$).*)",
+    "/((?!_next/static/|_next/image|api/health$|icons/(?:icon-192|icon-512|icon-maskable-512)\\.png$|sw\\.js$|offline\\.html$|icon\\.svg$|apple-icon\\.png$|(?:en|ar)/manifest\\.webmanifest$).*)",
   ],
 };

@@ -6,16 +6,12 @@ import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 
 import { toApproval, toAuditEntry, toAutomation, toConnection, toCreative } from "./prisma-mappers";
 import {
-  CONNECTION_LOCK_TIMEOUT_MS,
   CURRENT_CONNECTION_STATUSES,
   assertCiphertext,
   emptyStatusCounts,
   type ConnectionRepository,
   type DataStore,
 } from "./types";
-
-/** Long enough for one token refresh round trip (with retries) while the row is locked. */
-const LOCK_TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: CONNECTION_LOCK_TIMEOUT_MS } as const;
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -29,8 +25,7 @@ function isUniqueViolation(error: unknown) {
 
 function build(db: Db, root: PrismaClient): DataStore {
   /** Runs `fn` in the current transaction, or opens one. */
-  const inTransaction = <T>(fn: (tx: Db) => Promise<T>, options?: { maxWait: number; timeout: number }) =>
-    db !== root ? fn(db) : root.$transaction((tx) => fn(tx), options);
+  const inTransaction = <T>(fn: (tx: Db) => Promise<T>) => (db !== root ? fn(db) : root.$transaction((tx) => fn(tx)));
 
   const connections: ConnectionRepository = {
     async getCurrent(workspaceId, provider) {
@@ -71,6 +66,8 @@ function build(db: Db, root: PrismaClient): DataStore {
           connectedAt: input.connectedAt,
           lastSyncedAt: input.lastSyncedAt,
           lastError: null,
+          refreshLeaseId: null,
+          refreshLeaseUntil: null,
         };
         const row = await tx.integrationConnection.upsert({
           where: {
@@ -98,12 +95,36 @@ function build(db: Db, root: PrismaClient): DataStore {
       const row = await db.integrationConnection.findFirst({ where: { workspaceId, id } });
       return row ? toConnection(row) : null;
     },
-    async withLock(workspaceId, id, fn) {
-      return inTransaction(async (tx) => {
-        await tx.$queryRaw`SELECT id FROM integration_connections WHERE id = ${id} AND workspace_id = ${workspaceId} FOR UPDATE`;
-        const row = await tx.integrationConnection.findFirst({ where: { workspaceId, id } });
-        return fn(row ? toConnection(row) : null, build(tx, root).connections);
-      }, LOCK_TRANSACTION_OPTIONS);
+    async get(workspaceId, id) {
+      const row = await db.integrationConnection.findFirst({ where: { workspaceId, id } });
+      return row ? toConnection(row) : null;
+    },
+    async updateIfStatus(workspaceId, id, status, patch) {
+      assertCiphertext(patch.encryptedCredentials);
+      const { count } = await db.integrationConnection.updateMany({ where: { workspaceId, id, status }, data: patch });
+      return count ? connections.get(workspaceId, id) : null;
+    },
+    async acquireRefreshLease(workspaceId, id, leaseId, now, until) {
+      // A single UPDATE: concurrent claimants serialize on the row and re-check the
+      // WHERE clause, so at most one wins. Nothing stays locked afterwards.
+      const { count } = await db.integrationConnection.updateMany({
+        where: {
+          workspaceId,
+          id,
+          status: "CONNECTED",
+          OR: [{ refreshLeaseUntil: null }, { refreshLeaseUntil: { lt: now } }],
+        },
+        data: { refreshLeaseId: leaseId, refreshLeaseUntil: until },
+      });
+      return count === 1;
+    },
+    async completeRefreshLease(workspaceId, id, leaseId, patch) {
+      assertCiphertext(patch.encryptedCredentials);
+      const { count } = await db.integrationConnection.updateMany({
+        where: { workspaceId, id, refreshLeaseId: leaseId, status: "CONNECTED" },
+        data: { ...patch, refreshLeaseId: null, refreshLeaseUntil: null },
+      });
+      return count ? connections.get(workspaceId, id) : null;
     },
   };
 

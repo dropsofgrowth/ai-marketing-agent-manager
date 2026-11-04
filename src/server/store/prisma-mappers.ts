@@ -138,6 +138,8 @@ export function toConnection(row: ConnectionRow): IntegrationConnection {
     connectedAt: row.connectedAt,
     lastSyncedAt: row.lastSyncedAt,
     lastError: row.lastError,
+    refreshLeaseId: row.refreshLeaseId,
+    refreshLeaseUntil: row.refreshLeaseUntil,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

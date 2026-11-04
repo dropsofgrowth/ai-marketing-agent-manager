@@ -53,4 +53,18 @@ describe("credential encryption", () => {
   it("rejects malformed keys", () => {
     expect(() => encryptSecret("x", Buffer.alloc(16).toString("base64"), "c")).toThrow(/32 bytes/);
   });
+
+  it("accepts only the full 16-byte tag and a 12-byte IV", () => {
+    const [version, iv, tag, ciphertext] = encryptSecret("secret-token", key, "c").split(".");
+    const tagBytes = Buffer.from(tag, "base64url");
+    const ivBytes = Buffer.from(iv, "base64url");
+    expect([tagBytes.length, ivBytes.length]).toEqual([16, 12]);
+    // A truncated (but otherwise genuine) GCM tag would weaken authentication: refused.
+    for (const short of [4, 8, 12, 15]) {
+      const truncated = [version, iv, tagBytes.subarray(0, short).toString("base64url"), ciphertext].join(".");
+      expect(() => decryptSecret(truncated, key, "c"), `${short}-byte tag`).toThrow(/format/);
+    }
+    const longIv = [version, Buffer.concat([ivBytes, Buffer.alloc(4)]).toString("base64url"), tag, ciphertext].join(".");
+    expect(() => decryptSecret(longIv, key, "c")).toThrow(/format/);
+  });
 });

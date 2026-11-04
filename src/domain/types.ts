@@ -222,6 +222,9 @@ export type IntegrationConnection = {
   connectedAt: Date | null;
   lastSyncedAt: Date | null;
   lastError: string | null;
+  /** Server instance currently refreshing the token, and until when its claim holds. */
+  refreshLeaseId: string | null;
+  refreshLeaseUntil: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };

@@ -9,14 +9,17 @@ import { createMemoryLogger } from "@/server/logging";
 import { decryptSecret } from "@/server/security/encryption";
 import { buildDemoData, DEMO_USER, DEMO_WORKSPACE } from "@/server/store/demo-data";
 import { createMemoryStore } from "@/server/store/memory-store";
-import { CONNECTION_LOCK_TIMEOUT_MS, type DataStore } from "@/server/store/types";
+import type { DataStore } from "@/server/store/types";
 
 import { createFakeShopify } from "../../../../test/fake-shopify";
 
 import type { ShopifyAppConfig, ShopifyReadiness } from "./config";
 import {
+  LEASE_MAX_POLLS,
+  LEASE_POLL_MS,
   REFRESH_ATTEMPT_TIMEOUT_MS,
   REFRESH_BACKOFF_MS,
+  REFRESH_LEASE_MS,
   REFRESH_MAX_ATTEMPTS,
   createShopifyConnectionService,
   type ShopifyConnectionService,
@@ -71,18 +74,28 @@ describe("Shopify connection service", () => {
     });
     logger = createMemoryLogger();
     sleeps = [];
-    service = createShopifyConnectionService({
+    service = instance();
+  });
+
+  /** A service as one server process would have it (own caches and in-flight map, shared store). */
+  function instance(sleep: (ms: number) => Promise<void> = async (ms) => void sleeps.push(ms)) {
+    return createShopifyConnectionService({
       store,
       readiness: () => readiness,
       fetchImpl: fake.fetchImpl,
       logger,
       now: () => clock,
       cache: createTtlCache(),
-      sleep: async (ms) => {
-        sleeps.push(ms);
-      },
+      sleep,
     });
-  });
+  }
+  const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, Math.min(ms, 5)));
+  const refreshRequests = () => fake.state.tokenRequests.filter((r) => r.get("grant_type") === "refresh_token");
+  async function liveService(svc: ShopifyConnectionService = service) {
+    const source = await svc.resolveSource(owner.workspaceId);
+    if (source.mode !== "live") throw new Error(`expected live, got ${source.mode}`);
+    return source.service;
+  }
 
   /** Runs the full browser round trip: start → Shopify approval → callback. */
   async function connect(actor: Actor = owner) {
@@ -209,7 +222,7 @@ describe("Shopify connection service", () => {
     expect(sales.days[0]).toMatchObject({ orders: 1, revenueMinor: 25000 });
   });
 
-  it("refreshes an expiring token once, under a lock, and stores the rotated refresh token", async () => {
+  it("refreshes an expiring token once per process and stores the rotated refresh token", async () => {
     await connect();
     const before = (await current())!;
     clock = new Date(clock.getTime() + 58 * 60_000); // within the 5-minute refresh margin
@@ -229,7 +242,109 @@ describe("Shopify connection service", () => {
     const creds = JSON.parse(decryptSecret(after.encryptedCredentials!, KEY, `integration_connection:${owner.workspaceId}:SHOPIFY:${SHOP}`));
     expect(creds).toMatchObject({ accessToken: "shpat_fake_access_2", refreshToken: "shprt_fake_refresh_2" });
     expect(fake.state.refreshTokens.has("shprt_fake_refresh_1")).toBe(false);
+    expect(after).toMatchObject({ refreshLeaseId: null, refreshLeaseUntil: null }); // lease released
     expect(allLogs()).not.toMatch(/shpat_|shprt_/);
+  });
+
+  it("refreshes once across server instances: the others wait for the lease and use the rotated token", async () => {
+    await connect();
+    clock = new Date(clock.getTime() + 58 * 60_000);
+    const servers = [instance(realSleep), instance(realSleep), instance(realSleep)];
+    const shops = await Promise.all(servers.map(async (svc) => (await liveService(svc)).getShop()));
+    expect(shops.map((s) => s.name)).toEqual(["Drops Of Growth", "Drops Of Growth", "Drops Of Growth"]);
+    expect(refreshRequests()).toHaveLength(1);
+    // Every GraphQL call used a valid token: the first one or the rotated one.
+    expect(fake.state.graphqlRequests.every((r) => fake.state.accessTokens.has(r.token))).toBe(true);
+    expect(await current()).toMatchObject({ status: "CONNECTED", refreshLeaseId: null });
+  });
+
+  it("waits for another server's lease, then takes over once a crashed holder's lease expires", async () => {
+    await connect();
+    const stored = (await current())!;
+    clock = new Date(clock.getTime() + 58 * 60_000);
+    // A server crashed mid-refresh and left its lease behind.
+    expect(await store.connections.acquireRefreshLease(owner.workspaceId, stored.id, "crashed", clock, new Date(clock.getTime() + REFRESH_LEASE_MS))).toBe(true);
+
+    await expectCode((await liveService()).getShop(), "SHOPIFY_UNAVAILABLE");
+    expect(sleeps).toEqual(Array(LEASE_MAX_POLLS).fill(LEASE_POLL_MS));
+    expect(refreshRequests()).toHaveLength(0);
+    expect(allLogs()).toContain("refresh_wait_timeout");
+
+    clock = new Date(clock.getTime() + REFRESH_LEASE_MS + 1_000); // the abandoned lease has expired
+    expect((await (await liveService(instance())).getShop()).name).toBe("Drops Of Growth");
+    expect(refreshRequests()).toHaveLength(1);
+    expect(await current()).toMatchObject({ status: "CONNECTED", refreshLeaseId: null });
+  });
+
+  it("never stores a token whose refresh finished after the store was disconnected", async () => {
+    await connect();
+    const stored = (await current())!;
+    clock = new Date(clock.getTime() + 58 * 60_000);
+    fake.state.tokenOverrides.push(() => {
+      // The user disconnects while Shopify is answering the refresh.
+      void store.connections.update(owner.workspaceId, stored.id, {
+        status: "REVOKED",
+        encryptedCredentials: null,
+        credentialsKeyVersion: null,
+        accessTokenExpiresAt: null,
+        refreshTokenExpiresAt: null,
+      });
+      return Response.json({
+        access_token: "late_access_token",
+        scope: "read_orders,read_products",
+        expires_in: 3600,
+        refresh_token: "late_refresh_token",
+        refresh_token_expires_in: 7_776_000,
+      });
+    });
+    await expectCode((await liveService()).getShop(), "SHOPIFY_NOT_CONNECTED");
+    const row = await store.connections.get(owner.workspaceId, stored.id);
+    expect(row).toMatchObject({ status: "REVOKED", encryptedCredentials: null });
+  });
+
+  it("discards a refreshed token that gained write scopes, keeping the store read-only", async () => {
+    await connect();
+    clock = new Date(clock.getTime() + 58 * 60_000);
+    fake.state.scopes = "read_orders,read_products,write_products";
+    await expectCode((await liveService()).getShop(), "SHOPIFY_WRITE_SCOPES_GRANTED");
+    expect(await current()).toMatchObject({
+      status: "ERROR",
+      lastError: "SHOPIFY_WRITE_SCOPES_GRANTED",
+      encryptedCredentials: null,
+      refreshLeaseId: null,
+    });
+    expect(fake.state.graphqlRequests.filter((r) => r.token === "shpat_fake_access_2")).toHaveLength(0);
+    expect(await service.resolveSource(owner.workspaceId)).toMatchObject({ mode: "error", code: "SHOPIFY_WRITE_SCOPES_GRANTED" });
+  });
+
+  it("retries saving a rotated token after a transient database error instead of losing it", async () => {
+    await connect();
+    clock = new Date(clock.getTime() + 58 * 60_000);
+    const complete = store.connections.completeRefreshLease.bind(store.connections);
+    let failures = 1;
+    store.connections.completeRefreshLease = async (...args) => {
+      if (args[3].encryptedCredentials && failures-- > 0) throw new Error("connection terminated unexpectedly");
+      return complete(...args);
+    };
+    expect((await (await liveService()).getShop()).name).toBe("Drops Of Growth");
+    const creds = JSON.parse(
+      decryptSecret((await current())!.encryptedCredentials!, KEY, `integration_connection:${owner.workspaceId}:SHOPIFY:${SHOP}`),
+    );
+    expect(creds.refreshToken).toBe("shprt_fake_refresh_2");
+    expect(refreshRequests()).toHaveLength(1);
+  });
+
+  it("records a rejected refresh once, however many servers hit it", async () => {
+    await connect();
+    fake.state.refreshTokens.clear();
+    clock = new Date(clock.getTime() + 2 * 3_600_000);
+    const results = await Promise.allSettled(
+      [instance(realSleep), instance(realSleep), instance(realSleep)].map(async (svc) => (await liveService(svc)).getShop()),
+    );
+    expect(results.every((r) => r.status === "rejected" && (r.reason as DomainError).code === "SHOPIFY_RECONNECT_REQUIRED")).toBe(true);
+    expect(refreshRequests()).toHaveLength(1);
+    const errors = (await store.audit.list(owner.workspaceId)).filter((e) => e.action === "integration.error");
+    expect(errors).toHaveLength(1);
   });
 
   it("asks for reconnection when Shopify rejects the refresh token, and never falls back to demo data", async () => {
@@ -264,11 +379,11 @@ describe("Shopify connection service", () => {
     expect(sleeps).toEqual([...REFRESH_BACKOFF_MS]);
   });
 
-  it("keeps the worst-case token refresh well inside the row-lock timeout", () => {
+  it("keeps the worst-case token refresh well inside the refresh lease", () => {
     const backoff = REFRESH_BACKOFF_MS.slice(0, REFRESH_MAX_ATTEMPTS - 1).reduce((sum, ms) => sum + ms, 0);
     const worstCase = REFRESH_MAX_ATTEMPTS * REFRESH_ATTEMPT_TIMEOUT_MS + backoff;
-    // ≥ 10 s left for the database work in the same transaction.
-    expect(worstCase).toBeLessThanOrEqual(CONNECTION_LOCK_TIMEOUT_MS - 10_000);
+    // ≥ 15 s left to save the rotated token (with retries) before another server may take over.
+    expect(worstCase).toBeLessThanOrEqual(REFRESH_LEASE_MS - 15_000);
   });
 
   it("asks to reconnect when the stored token can't be decrypted (encryption key changed)", async () => {
@@ -299,12 +414,12 @@ describe("Shopify connection service", () => {
     expect((await service.resolveSource(owner.workspaceId)).mode).toBe("live");
   });
 
-  it("handles undecryptable credentials met during a locked refresh", async () => {
+  it("handles undecryptable credentials met during a refresh", async () => {
     await connect();
     const source = await service.resolveSource(owner.workspaceId);
     if (source.mode !== "live") throw new Error("expected live");
     const stored = (await current())!;
-    // Another writer left ciphertext this key can't open; the refresh path re-reads it under the lock.
+    // Another writer left ciphertext this key can't open; the refresh path re-reads it under the lease.
     await store.connections.update(owner.workspaceId, stored.id, { encryptedCredentials: "v1.AAAA.BBBB.CCCC" });
     clock = new Date(clock.getTime() + 58 * 60_000);
 
@@ -313,8 +428,9 @@ describe("Shopify connection service", () => {
       status: "ERROR",
       lastError: "SHOPIFY_CREDENTIALS_UNREADABLE",
       encryptedCredentials: "v1.AAAA.BBBB.CCCC",
+      refreshLeaseId: null,
     });
-    expect(fake.state.tokenRequests.filter((r) => r.get("grant_type") === "refresh_token")).toHaveLength(0);
+    expect(refreshRequests()).toHaveLength(0);
   });
 
   it("marks the connection for reconnection when the app loses access (401 after refresh)", async () => {

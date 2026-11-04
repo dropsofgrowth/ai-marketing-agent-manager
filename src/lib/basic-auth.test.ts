@@ -6,29 +6,54 @@ const basic = (credentials: string) => `Basic ${Buffer.from(credentials, "utf8")
 const GOOD = { user: "owner", password: "a-long-test-password" };
 
 describe("dashboard access policy (fail closed)", () => {
-  it("requires credentials in production", () => {
-    expect(evaluateDashboardAuth({ user: undefined, password: undefined, production: true })).toEqual({
-      mode: "misconfigured",
-      problems: ["missing_user", "missing_password"],
-    });
-    expect(evaluateDashboardAuth({ user: "  ", password: "", production: true }).mode).toBe("misconfigured");
+  const evaluate = (
+    user: string | undefined,
+    password: string | undefined,
+    { development = false, disableFlag }: { development?: boolean; disableFlag?: string } = {},
+  ) => evaluateDashboardAuth({ user, password, disableFlag, development });
+
+  it("requires credentials however the server was started (production, test, development)", () => {
+    for (const development of [false, true]) {
+      expect(evaluate(undefined, undefined, { development })).toEqual({
+        mode: "misconfigured",
+        problems: ["missing_user", "missing_password"],
+      });
+      expect(evaluate("  ", "", { development }).mode).toBe("misconfigured");
+    }
   });
 
-  it("allows an open dashboard only in development/test, and only with no credentials at all", () => {
-    expect(evaluateDashboardAuth({ user: undefined, password: undefined, production: false })).toEqual({ mode: "open" });
-    // A half configuration is a mistake — refused everywhere.
-    expect(evaluateDashboardAuth({ user: "owner", password: undefined, production: false })).toEqual({
+  it("runs open only with the explicit DASHBOARD_AUTH_DISABLED=1 opt-in under `next dev`, without credentials", () => {
+    expect(evaluate(undefined, undefined, { development: true, disableFlag: "1" })).toEqual({ mode: "open" });
+    // Configured credentials still apply when the flag is set.
+    expect(evaluate(GOOD.user, GOOD.password, { development: true, disableFlag: "1" })).toEqual({ mode: "required", ...GOOD });
+    // Outside `next dev`, or with any other value, the flag itself refuses every request.
+    for (const [development, disableFlag] of [
+      [false, "1"],
+      [true, "true"],
+      [true, "0"],
+      [true, "yes"],
+    ] as const) {
+      expect(evaluate(undefined, undefined, { development, disableFlag })).toEqual({
+        mode: "misconfigured",
+        problems: ["disable_flag_not_allowed"],
+      });
+    }
+    expect(evaluate(GOOD.user, GOOD.password, { disableFlag: "1" })).toEqual({
+      mode: "misconfigured",
+      problems: ["disable_flag_not_allowed"],
+    });
+  });
+
+  it("refuses a half configuration everywhere", () => {
+    expect(evaluate("owner", undefined, { development: true, disableFlag: "1" })).toEqual({
       mode: "misconfigured",
       problems: ["missing_password"],
     });
-    expect(evaluateDashboardAuth({ user: undefined, password: GOOD.password, production: true })).toEqual({
-      mode: "misconfigured",
-      problems: ["missing_user"],
-    });
+    expect(evaluate(undefined, GOOD.password)).toEqual({ mode: "misconfigured", problems: ["missing_user"] });
   });
 
   it("rejects invalid credentials instead of using them", () => {
-    const check = (user: string, password: string) => evaluateDashboardAuth({ user, password, production: true });
+    const check = (user: string, password: string) => evaluate(user, password);
     expect(check("owner", "short")).toEqual({ mode: "misconfigured", problems: ["password_too_short"] });
     expect(check("own:er", GOOD.password)).toEqual({ mode: "misconfigured", problems: ["invalid_user"] });
     expect(check("owner\n", GOOD.password).mode).toBe("misconfigured");
@@ -42,6 +67,8 @@ describe("dashboard access policy (fail closed)", () => {
     expect(text).toContain("DASHBOARD_BASIC_AUTH_USER is not set");
     expect(text).toContain("at least 12 characters");
     expect(text).not.toContain(GOOD.password);
+    expect(describeAuthProblems(["missing_user", "missing_password"])).toContain("DASHBOARD_AUTH_DISABLED=1");
+    expect(describeAuthProblems(["disable_flag_not_allowed"])).toContain("remove it");
   });
 });
 
