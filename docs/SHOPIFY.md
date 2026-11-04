@@ -155,6 +155,8 @@ Server logs use events named `shopify.*` (e.g. `shopify.oauth.callback_rejected`
 
 ## 8. Tests
 
+All of the below also run automatically on every pull request (`.github/workflows/ci.yml`).
+
 ```bash
 npm run check                      # lint + types + unit tests (OAuth, HMAC, refresh, adapter, service)
 ```

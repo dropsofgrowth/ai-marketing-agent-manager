@@ -112,6 +112,16 @@ For a shared preview deployment:
 | `npm run db:seed` | Seed demo workspace (skips if it already has data). |
 | `npm run db:generate` | Regenerate the Prisma client. |
 
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`, with a read-only token
+and no repository secrets:
+
+- **check** — `npm run check` (lint, typecheck, unit tests) and `npm run build`;
+- **integration** — PostgreSQL 16 service: migrations, schema-drift check, seed, repository tests; then the
+  Shopify connect flow against a *simulated* Shopify (fails if a token/secret/code reaches the server log or
+  a GraphQL mutation is sent) and the responsive + PWA smoke test.
+
 ## Environment variables
 
 See [`.env.example`](.env.example) for the full, commented template. Never commit `.env`.
