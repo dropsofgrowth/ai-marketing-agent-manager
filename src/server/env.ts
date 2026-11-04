@@ -68,15 +68,26 @@ const envSchema = z.object({
   ),
   META_API_VERSION: optionalString,
 
+  /** Dev Dashboard app "Client ID" (public identifier, but still kept server-side). */
+  SHOPIFY_CLIENT_ID: optionalString,
+  /** Dev Dashboard app "Secret". Signs OAuth callbacks and redeems/refreshes tokens. Never sent to the browser. */
+  SHOPIFY_CLIENT_SECRET: optionalString,
+  /** The one store this deployment may connect to, e.g. drops-of-growth.myshopify.com. */
   SHOPIFY_STORE_DOMAIN: z.preprocess(
+    (value) => (typeof emptyToUndefined(value) === "string" ? String(value).trim().toLowerCase() : undefined),
+    z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/, "SHOPIFY_STORE_DOMAIN must be <store>.myshopify.com")
+      .optional(),
+  ),
+  /** Pinned Admin API version (YYYY-01|04|07|10). Bump deliberately after testing. */
+  SHOPIFY_API_VERSION: z.preprocess(
     emptyToUndefined,
     z
       .string()
-      .regex(/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i, "SHOPIFY_STORE_DOMAIN must be <store>.myshopify.com")
-      .optional(),
+      .regex(/^\d{4}-(01|04|07|10)$/, "SHOPIFY_API_VERSION must look like 2026-10")
+      .default("2026-10"),
   ),
-  SHOPIFY_ADMIN_ACCESS_TOKEN: optionalString,
-  SHOPIFY_API_VERSION: optionalString,
 
   HIGGSFIELD_API_KEY: optionalString,
   HIGGSFIELD_API_SECRET: optionalString,
@@ -120,7 +131,7 @@ export function getIntegrationEnvStatus(env: ServerEnv = getEnv()): IntegrationE
   };
   return {
     metaAds: check(["META_APP_ID", "META_APP_SECRET", "META_ACCESS_TOKEN", "META_AD_ACCOUNT_ID"]),
-    shopify: check(["SHOPIFY_STORE_DOMAIN", "SHOPIFY_ADMIN_ACCESS_TOKEN"]),
-    higgsfield: check(["HIGGSFIELD_API_KEY", "HIGGSFIELD_API_BASE_URL"]),
+    shopify: check(["SHOPIFY_CLIENT_ID", "SHOPIFY_CLIENT_SECRET", "SHOPIFY_STORE_DOMAIN"]),
+    higgsfield: check(["HIGGSFIELD_API_KEY", "HIGGSFIELD_API_SECRET", "HIGGSFIELD_API_BASE_URL"]),
   };
 }

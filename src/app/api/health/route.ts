@@ -17,7 +17,8 @@ export async function GET() {
   }
   const ok = storage === "ok";
   return Response.json(
-    { status: ok ? "ok" : "degraded", storage: { kind: store.kind, status: storage }, integrations: "mock" },
+    // Integration/connection state is deliberately not exposed on this public endpoint.
+    { status: ok ? "ok" : "degraded", storage: { kind: store.kind, status: storage } },
     { status: ok ? 200 : 503, headers: { "Cache-Control": "no-store" } },
   );
 }

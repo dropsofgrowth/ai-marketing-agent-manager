@@ -7,9 +7,10 @@ import {
 } from "@/integrations/mock-data/catalog";
 import { seededRandom } from "@/integrations/mock-data/random";
 import type {
-  DailySales,
   OrderSource,
-  ProductPerformance,
+  ProductPerformanceResult,
+  SalesWindow,
+  ShopifyCapabilities,
   ShopifyOrder,
   ShopifyProduct,
   ShopifyService,
@@ -37,22 +38,30 @@ const SOURCES: OrderSource[] = ["meta", "meta", "meta", "direct", "search", "ema
 /** Deterministic, read-only Shopify adapter. Never performs network I/O. */
 export class MockShopifyService implements ShopifyService {
   readonly info: IntegrationInfo = { provider: "SHOPIFY", mode: "mock" };
+  readonly capabilities: ShopifyCapabilities = {
+    sessions: true,
+    customerNames: true,
+    orderSources: true,
+    inventory: true,
+    orderHistoryDays: null,
+  };
 
   async getShop(): Promise<ShopifyShop> {
     return { ...MOCK_SHOP };
   }
 
-  async getDailySales(range: DateRange): Promise<DailySales[]> {
-    return dailySales(range);
+  async getDailySales(range: DateRange): Promise<SalesWindow> {
+    return { days: dailySales(range), complete: true };
   }
 
   async listProducts(): Promise<ShopifyProduct[]> {
     return mockProducts();
   }
 
-  async getProductPerformance(range: DateRange): Promise<ProductPerformance[]> {
-    const totalRevenue = dailySales(range).reduce((sum, d) => sum + d.revenueMinor, 0);
-    return mockProducts().map((product) => {
+  async getProductPerformance(range: DateRange): Promise<ProductPerformanceResult> {
+    const sales = dailySales(range);
+    const totalRevenue = sales.reduce((sum, d) => sum + d.revenueMinor, 0);
+    const rows = mockProducts().map((product) => {
       const revenueMinor = Math.round(totalRevenue * productWeight(product.id));
       return {
         productId: product.id,
@@ -60,6 +69,7 @@ export class MockShopifyService implements ShopifyService {
         unitsSold: Math.round(revenueMinor / product.priceMinor),
       };
     });
+    return { rows, ordersScanned: sales.reduce((sum, d) => sum + d.orders, 0), complete: true };
   }
 
   async listRecentOrders(limit: number, now: Date): Promise<ShopifyOrder[]> {
@@ -85,6 +95,7 @@ export class MockShopifyService implements ShopifyService {
         fulfillmentStatus: i < 3 || fulfillmentRoll > 0.7 ? "UNFULFILLED" : fulfillmentRoll > 0.6 ? "PARTIAL" : "FULFILLED",
         itemCount,
         source: SOURCES[Math.floor(rand() * SOURCES.length)],
+        test: false,
       });
     }
     return orders;

@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
 
 /**
  * AES-256-GCM envelope for third-party credentials stored at rest
@@ -17,6 +17,22 @@ function parseKey(base64Key: string): Buffer {
     throw new Error("CREDENTIALS_ENCRYPTION_KEY must be 32 bytes, base64-encoded (openssl rand -base64 32).");
   }
   return key;
+}
+
+/** True when the value decodes to exactly 32 bytes (usable as an AES-256 key). */
+export function isValidEncryptionKey(base64Key: string | undefined): boolean {
+  if (!base64Key) return false;
+  try {
+    return Buffer.from(base64Key, "base64").length === 32;
+  } catch {
+    return false;
+  }
+}
+
+/** Derives a purpose-specific HMAC key so the encryption key itself never signs anything. */
+export function signWithKey(base64Key: string, purpose: string, message: string): string {
+  const derived = createHmac("sha256", parseKey(base64Key)).update(`purpose:${purpose}`).digest();
+  return createHmac("sha256", derived).update(message).digest("base64url");
 }
 
 export function encryptSecret(plaintext: string, base64Key: string, context: string): string {

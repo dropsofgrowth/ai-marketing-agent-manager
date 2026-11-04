@@ -3,10 +3,12 @@
 This guide gets the dashboard onto an `https://` link you can open on an iPhone, an
 Android phone and a Windows or Mac computer, and install as an app (PWA).
 
-> **Mock data only.** Every option below runs the app with its built-in mock adapters.
-> Do **not** add real Meta, Shopify or Higgsfield credentials, and keep
-> `LIVE_EXECUTION_ENABLED=false`. No request is ever sent to those platforms; approved
-> changes can only be simulated.
+> **Mock data by default.** Every option below runs the app with its built-in mock
+> adapters. Do **not** add real Meta or Higgsfield credentials, and keep
+> `LIVE_EXECUTION_ENABLED=false`; approved changes can only be simulated.
+> **Shopify (read-only)** can be connected on a deployment with PostgreSQL, a
+> credential encryption key, an https `APP_URL` and Basic Auth — follow
+> **[docs/SHOPIFY.md](SHOPIFY.md)**. Use a separate database for preview deployments.
 
 PWA installation and the service worker need **HTTPS** (or `localhost`). All three
 options give you HTTPS automatically.
@@ -36,7 +38,8 @@ openssl rand -base64 24
 | `LIVE_EXECUTION_ENABLED` | `false` |
 | `DEFAULT_LOCALE` | `en` or `ar` |
 
-Leave every `META_*`, `SHOPIFY_*` and `HIGGSFIELD_*` variable **empty**.
+Leave every `META_*` and `HIGGSFIELD_*` variable **empty**. Add `SHOPIFY_*` only when
+you are ready to connect the store (see [docs/SHOPIFY.md](SHOPIFY.md)).
 
 Basic Auth protects every page and server action. The web-app manifest, icons,
 `/sw.js`, `/offline.html` and `/api/health` stay public on purpose: browsers fetch

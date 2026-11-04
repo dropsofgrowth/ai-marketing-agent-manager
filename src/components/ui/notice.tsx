@@ -1,4 +1,4 @@
-import { AlertTriangle, Info, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, ShieldCheck, XCircle } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/cn";
@@ -7,20 +7,25 @@ const TONES = {
   info: { className: "border-line bg-surface-2 text-ink-2", Icon: Info },
   safety: { className: "border-accent/25 bg-accent-soft text-ink", Icon: ShieldCheck },
   warning: { className: "border-warning/40 bg-warning-soft text-ink", Icon: AlertTriangle },
+  critical: { className: "border-critical/40 bg-critical-soft text-ink", Icon: XCircle },
+  success: { className: "border-good/40 bg-good-soft text-ink", Icon: CheckCircle2 },
 } as const;
 
 export function Notice({
   tone = "info",
   children,
   className,
+  role,
 }: {
   tone?: keyof typeof TONES;
   children: ReactNode;
   className?: string;
+  /** "alert" for results the user just triggered (announced by screen readers). */
+  role?: "alert" | "status";
 }) {
   const { className: toneClass, Icon } = TONES[tone];
   return (
-    <div className={cn("flex items-start gap-2.5 rounded-lg border px-3.5 py-2.5 text-sm", toneClass, className)}>
+    <div role={role} className={cn("flex items-start gap-2.5 rounded-lg border px-3.5 py-2.5 text-sm", toneClass, className)}>
       <Icon aria-hidden className="mt-0.5 size-4 shrink-0" />
       <div className="min-w-0">{children}</div>
     </div>

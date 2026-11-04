@@ -1,11 +1,14 @@
-import type { ApprovalRequest, AuditLogEntry, Automation, Creative } from "@/domain/types";
+import type { ApprovalRequest, AuditLogEntry, Automation, Creative, IntegrationConnection } from "@/domain/types";
 
 import type { DemoData } from "./demo-data";
 import {
+  CURRENT_CONNECTION_STATUSES,
+  assertCiphertext,
   emptyStatusCounts,
   type ApprovalRepository,
   type AuditRepository,
   type AutomationRepository,
+  type ConnectionRepository,
   type CreativeRepository,
   type DataStore,
 } from "./types";
@@ -21,7 +24,10 @@ export function createMemoryStore(seed: DemoData, idPrefix = "mem"): DataStore {
     creatives: structuredClone(seed.creatives),
     automations: structuredClone(seed.automations),
     audit: structuredClone(seed.audit),
+    connections: [] as IntegrationConnection[],
   };
+  /** Per-row lock chain so concurrent withLock() calls on one connection run one after another. */
+  const connectionLocks = new Map<string, Promise<void>>();
   let counter = 0;
   const newId = (kind: string) => `${idPrefix}_${kind}_${Date.now().toString(36)}_${(counter++).toString(36)}`;
   const clone = <T>(value: T): T => structuredClone(value);
@@ -155,12 +161,97 @@ export function createMemoryStore(seed: DemoData, idPrefix = "mem"): DataStore {
     },
   };
 
+  const isCurrent = (c: IntegrationConnection) => CURRENT_CONNECTION_STATUSES.includes(c.status);
+
+  const connections: ConnectionRepository = {
+    async getCurrent(workspaceId, provider) {
+      const found = state.connections.find((c) => c.workspaceId === workspaceId && c.provider === provider && isCurrent(c));
+      return found ? clone(found) : null;
+    },
+    async saveConnected(input) {
+      assertCiphertext(input.encryptedCredentials);
+      const now = new Date();
+      for (const other of state.connections) {
+        if (
+          other.workspaceId === input.workspaceId &&
+          other.provider === input.provider &&
+          other.externalAccountId !== input.externalAccountId &&
+          isCurrent(other)
+        ) {
+          Object.assign(other, {
+            status: "REVOKED",
+            encryptedCredentials: null,
+            credentialsKeyVersion: null,
+            accessTokenExpiresAt: null,
+            refreshTokenExpiresAt: null,
+            updatedAt: now,
+          });
+        }
+      }
+      const fields = {
+        status: "CONNECTED" as const,
+        displayName: input.displayName,
+        scopes: [...input.scopes],
+        encryptedCredentials: input.encryptedCredentials,
+        credentialsKeyVersion: input.credentialsKeyVersion,
+        accessTokenExpiresAt: input.accessTokenExpiresAt,
+        refreshTokenExpiresAt: input.refreshTokenExpiresAt,
+        connectedAt: input.connectedAt,
+        lastSyncedAt: input.lastSyncedAt,
+        lastError: null,
+        updatedAt: now,
+      };
+      const existing = state.connections.find(
+        (c) =>
+          c.workspaceId === input.workspaceId &&
+          c.provider === input.provider &&
+          c.externalAccountId === input.externalAccountId,
+      );
+      if (existing) {
+        Object.assign(existing, fields);
+        return clone(existing);
+      }
+      const created: IntegrationConnection = {
+        id: newId("con"),
+        workspaceId: input.workspaceId,
+        provider: input.provider,
+        externalAccountId: input.externalAccountId,
+        createdAt: now,
+        ...fields,
+      };
+      state.connections.push(created);
+      return clone(created);
+    },
+    async update(workspaceId, id, patch) {
+      assertCiphertext(patch.encryptedCredentials);
+      const found = state.connections.find((c) => c.workspaceId === workspaceId && c.id === id);
+      if (!found) return null;
+      Object.assign(found, clone(patch), { updatedAt: new Date() });
+      return clone(found);
+    },
+    async withLock(workspaceId, id, fn) {
+      const previous = connectionLocks.get(id) ?? Promise.resolve();
+      let release!: () => void;
+      const mine = previous.then(() => new Promise<void>((resolve) => (release = resolve)));
+      connectionLocks.set(id, mine);
+      await previous;
+      try {
+        const found = state.connections.find((c) => c.workspaceId === workspaceId && c.id === id);
+        return await fn(found ? clone(found) : null, connections);
+      } finally {
+        release();
+        if (connectionLocks.get(id) === mine) connectionLocks.delete(id);
+      }
+    },
+  };
+
   const store: DataStore = {
     kind: "memory",
     approvals,
     creatives,
     automations,
     audit,
+    connections,
     // Single process, single thread: operations are applied in order.
     transaction: (fn) => fn(store),
     ping: async () => {},

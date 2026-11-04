@@ -6,6 +6,9 @@ import { Suspense } from "react";
 
 import { BarList } from "@/components/charts/bar-list";
 import { TimeSeriesChart } from "@/components/charts/time-series-chart";
+import { DataSources } from "@/components/integrations/data-sources";
+import { RevenueChartCard } from "@/components/integrations/revenue-chart-card";
+import { StoreNotices } from "@/components/integrations/store-notices";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { DataList, DataListItem, MetricGrid } from "@/components/ui/data-list";
 import { PageHeader } from "@/components/ui/page-header";
@@ -46,6 +49,7 @@ async function AnalyticsContent({
   const perf = await loadPerformance(days, now);
   const rows = await loadCampaignRows(perf.range);
   const currency = perf.account.currency;
+  const storeCurrency = perf.shop?.currency ?? currency;
   const pct = (f: number) => fmt.percent(f, { signed: true });
   const vs = t(dict.common.vsPrevious, { n: days });
   const c = dict.metaAds.columns;
@@ -74,27 +78,24 @@ async function AnalyticsContent({
         })}
       </nav>
 
+      <DataSources store={perf.store.source} ads={perf.adsMode} i18n={i18n} />
+      <StoreNotices source={perf.store.source} complete={perf.store.complete} comparable={perf.comparable} showMixed i18n={i18n} />
+
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <StatTile label={dict.kpi.revenue} value={fmt.currency(perf.kpis.revenue.value, currency, { compact: true })} delta={deltaOf(perf.kpis.revenue.delta, pct)} deltaLabel={vs} trend={perf.trends.revenue} />
+        <StatTile
+          label={dict.kpi.revenue}
+          hint={perf.store.source.mode === "live" ? dict.kpi.revenueHintLive : undefined}
+          value={perf.kpis.revenue.value === null ? dict.common.none : fmt.currency(perf.kpis.revenue.value, storeCurrency, { compact: true })}
+          delta={deltaOf(perf.kpis.revenue.delta, pct)}
+          deltaLabel={vs}
+          trend={perf.trends.revenue}
+        />
         <StatTile label={dict.kpi.adSpend} value={fmt.currency(perf.kpis.spend.value, currency, { compact: true })} delta={deltaOf(perf.kpis.spend.delta, pct)} deltaLabel={vs} upIsGood={null} trend={perf.trends.spend} />
-        <StatTile label={dict.kpi.blendedRoas} hint={dict.kpi.blendedRoasHint} value={fmt.roas(perf.kpis.blendedRoas.value)} delta={deltaOf(perf.kpis.blendedRoas.delta, pct)} deltaLabel={vs} trend={perf.trends.blendedRoas} />
+        <StatTile label={dict.kpi.blendedRoas} hint={perf.comparable ? dict.kpi.blendedRoasHint : dict.kpi.blendedRoasUnavailable} value={fmt.roas(perf.kpis.blendedRoas.value)} delta={deltaOf(perf.kpis.blendedRoas.delta, pct)} deltaLabel={vs} trend={perf.trends.blendedRoas} />
         <StatTile label={dict.kpi.roas} hint={dict.kpi.roasHint} value={fmt.roas(perf.kpis.metaRoas.value)} delta={deltaOf(perf.kpis.metaRoas.delta, pct)} deltaLabel={vs} trend={perf.trends.metaRoas} />
       </div>
 
-      <Card>
-        <CardHeader title={dict.charts.revenueVsSpend} description={dict.charts.revenueVsSpendDesc} />
-        <CardBody>
-          <TimeSeriesChart
-            title={dict.charts.revenueVsSpend}
-            dates={perf.sales.map((d) => d.date)}
-            format={{ kind: "currency", currency }}
-            series={[
-              { id: "revenue", label: dict.charts.series.revenue, color: "series-1", values: perf.sales.map((d) => d.revenueMinor) },
-              { id: "spend", label: dict.charts.series.spend, color: "series-2", values: perf.ads.map((d) => d.spendMinor) },
-            ]}
-          />
-        </CardBody>
-      </Card>
+      <RevenueChartCard perf={perf} i18n={i18n} />
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <Card>

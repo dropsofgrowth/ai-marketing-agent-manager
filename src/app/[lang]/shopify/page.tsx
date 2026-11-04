@@ -4,6 +4,8 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 
 import { TimeSeriesChart } from "@/components/charts/time-series-chart";
+import { DataSources } from "@/components/integrations/data-sources";
+import { StoreNotices } from "@/components/integrations/store-notices";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { DataList, DataListItem, MetricGrid } from "@/components/ui/data-list";
@@ -12,14 +14,22 @@ import { PageHeader } from "@/components/ui/page-header";
 import { SectionSkeleton } from "@/components/ui/skeleton";
 import { StatTile, deltaOf } from "@/components/ui/stat-tile";
 import { TableContainer, Td, Th } from "@/components/ui/table";
+import type { DomainErrorCode } from "@/domain/errors";
 import { richT } from "@/i18n/rich";
 import { getI18n, type ServerI18n } from "@/i18n/server";
-import { getIntegrations } from "@/integrations/registry";
-import type { ShopifyOrder, ShopifyProduct } from "@/integrations/shopify/types";
+import type {
+  FinancialStatus,
+  ProductPerformanceResult,
+  ShopifyOrder,
+  ShopifyProduct,
+} from "@/integrations/shopify/types";
+import { getShopifySource, toShopifyErrorCode } from "@/server/integrations/shopify";
+import { log } from "@/server/logging";
 import { loadPerformance } from "@/server/queries/performance";
 
 const DAYS = 30;
 const LOW_STOCK = 10;
+const RECENT_ORDERS = 8;
 
 export async function generateMetadata({ params }: PageProps<"/[lang]/shopify">): Promise<Metadata> {
   return { title: getI18n((await params).lang).dict.shopify.title };
@@ -47,8 +57,9 @@ function ProductSwatch({ product }: { product: ShopifyProduct }) {
   );
 }
 
-function StockBadge({ inventory, i18n }: { inventory: number; i18n: ServerI18n }) {
-  if (inventory === 0) {
+function StockBadge({ inventory, i18n }: { inventory: number | null; i18n: ServerI18n }) {
+  if (inventory === null) return null;
+  if (inventory <= 0) {
     return (
       <Badge tone="critical" icon={<PackageX aria-hidden className="size-3" />}>
         {i18n.dict.shopify.outOfStock}
@@ -65,64 +76,92 @@ function StockBadge({ inventory, i18n }: { inventory: number; i18n: ServerI18n }
   return null;
 }
 
-const FINANCIAL_TONE: Record<ShopifyOrder["financialStatus"], BadgeTone> = {
+const FINANCIAL_TONE: Record<FinancialStatus, BadgeTone> = {
   PAID: "good",
   PENDING: "warning",
+  AUTHORIZED: "warning",
+  PARTIALLY_PAID: "warning",
+  PARTIALLY_REFUNDED: "neutral",
   REFUNDED: "neutral",
+  VOIDED: "neutral",
+  EXPIRED: "neutral",
 };
+
+/** Products, product performance and recent orders — or an error code, never substitute data. */
+async function loadCatalog(range: { from: string; to: string }, now: Date) {
+  const source = await getShopifySource();
+  if (source.mode === "error") return { ok: false as const, code: source.code };
+  try {
+    const [products, performance, orders] = await Promise.all([
+      source.service.listProducts(),
+      source.service.getProductPerformance(range),
+      source.service.listRecentOrders(RECENT_ORDERS, now),
+    ]);
+    return { ok: true as const, products, performance, orders, capabilities: source.service.capabilities };
+  } catch (error) {
+    const code: DomainErrorCode = toShopifyErrorCode(error);
+    log("warn", "shopify.catalog_unavailable", { errorCode: code });
+    return { ok: false as const, code };
+  }
+}
 
 async function ShopifyContent({ i18n }: { i18n: ServerI18n }) {
   await connection();
   const now = new Date();
   const { dict, fmt, t } = i18n;
-  const { shopify } = getIntegrations();
   const perf = await loadPerformance(DAYS, now);
-  const [products, performance, orders] = await Promise.all([
-    shopify.listProducts(),
-    shopify.getProductPerformance(perf.range),
-    shopify.listRecentOrders(8, now),
-  ]);
+  const source = perf.store.source;
+  const header = (
+    <>
+      <DataSources store={source} i18n={i18n} />
+      <StoreNotices source={source} complete={perf.store.complete} i18n={i18n} />
+    </>
+  );
+  if (!perf.shop) return <div className="space-y-5 sm:space-y-6">{header}</div>;
+
+  const catalog = await loadCatalog(perf.range, now);
   const currency = perf.shop.currency;
+  const live = source.mode === "live";
+  const capabilities = perf.store.capabilities;
   const pct = (f: number) => fmt.percent(f, { signed: true });
   const vs = t(dict.common.vsPrevious, { n: DAYS });
-  const c = dict.shopify.columns;
-
-  const productRows = products
-    .map((p) => ({ product: p, perf: performance.find((x) => x.productId === p.id) }))
-    .sort((a, b) => (b.perf?.revenueMinor ?? 0) - (a.perf?.revenueMinor ?? 0));
+  const money = (value: number | null) => (value === null ? dict.common.none : fmt.currency(value, currency));
 
   return (
     <div className="space-y-5 sm:space-y-6">
+      {header}
       <p className="text-sm text-ink-2">{richT(dict.shopify.subtitle, { store: perf.shop.name })}</p>
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatTile
           label={dict.kpi.revenue}
-          value={fmt.currency(perf.kpis.revenue.value, currency, { compact: true })}
+          hint={live ? dict.kpi.revenueHintLive : undefined}
+          value={perf.kpis.revenue.value === null ? dict.common.none : fmt.currency(perf.kpis.revenue.value, currency, { compact: true })}
           delta={deltaOf(perf.kpis.revenue.delta, pct)}
           deltaLabel={vs}
           trend={perf.trends.revenue}
         />
         <StatTile
           label={dict.kpi.orders}
-          value={fmt.number(perf.kpis.orders.value)}
+          value={perf.kpis.orders.value === null ? dict.common.none : fmt.number(perf.kpis.orders.value)}
           delta={deltaOf(perf.kpis.orders.delta, pct)}
           deltaLabel={vs}
           trend={perf.trends.orders}
         />
         <StatTile
           label={dict.kpi.aov}
-          value={perf.kpis.aov.value === null ? "—" : fmt.currency(perf.kpis.aov.value, currency)}
+          value={money(perf.kpis.aov.value)}
           delta={deltaOf(perf.kpis.aov.delta, pct)}
           deltaLabel={vs}
           trend={perf.trends.aov}
         />
         <StatTile
           label={dict.kpi.conversionRate}
-          value={perf.kpis.conversionRate.value === null ? "—" : fmt.percent(perf.kpis.conversionRate.value, { digits: 2 })}
+          hint={capabilities?.sessions === false ? dict.kpi.conversionUnavailable : undefined}
+          value={perf.kpis.conversionRate.value === null ? dict.common.none : fmt.percent(perf.kpis.conversionRate.value, { digits: 2 })}
           delta={deltaOf(perf.kpis.conversionRate.delta, pct)}
           deltaLabel={vs}
-          trend={perf.trends.conversionRate}
+          trend={capabilities?.sessions === false ? undefined : perf.trends.conversionRate}
         />
       </div>
 
@@ -139,32 +178,86 @@ async function ShopifyContent({ i18n }: { i18n: ServerI18n }) {
         </CardBody>
       </Card>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <Card>
-          <CardHeader title={dict.shopify.products} description={t(dict.common.lastNDays, { n: DAYS })} />
-          <DataList label={dict.shopify.products} className="mt-2">
-            {productRows.map(({ product, perf: p }) => (
+      {catalog.ok ? (
+        <div className="grid grid-cols-1 gap-6 2xl:grid-cols-2">
+          <ProductsCard
+            products={catalog.products}
+            performance={catalog.performance}
+            showBasis={live}
+            inventoryAvailable={catalog.capabilities.inventory}
+            i18n={i18n}
+          />
+          <OrdersCard orders={catalog.orders} now={now} showCustomer={catalog.capabilities.customerNames} showSource={catalog.capabilities.orderSources} i18n={i18n} />
+        </div>
+      ) : (
+        <Notice tone="critical">
+          {dict.dataSource.errorNotice} {(dict.errors as Record<string, string>)[catalog.code] ?? dict.errors.UNEXPECTED}
+        </Notice>
+      )}
+
+      <Notice>{dict.shopify.readOnly}</Notice>
+    </div>
+  );
+}
+
+function ProductsCard({
+  products,
+  performance,
+  showBasis,
+  inventoryAvailable,
+  i18n,
+}: {
+  products: ShopifyProduct[];
+  performance: ProductPerformanceResult;
+  showBasis: boolean;
+  inventoryAvailable: boolean;
+  i18n: ServerI18n;
+}) {
+  const { dict: d, fmt: f, t } = i18n;
+  const c = d.shopify.columns;
+  const rows = products
+    .map((p) => ({ product: p, perf: performance.rows.find((x) => x.productId === p.id) }))
+    .sort((a, b) => (b.perf?.revenueMinor ?? 0) - (a.perf?.revenueMinor ?? 0));
+  const stock = (p: ShopifyProduct) => (p.inventory === null ? d.common.none : f.number(p.inventory));
+  const description = [
+    t(d.common.lastNDays, { n: DAYS }),
+    !performance.complete ? t(d.shopify.productsPartial, { n: performance.ordersScanned }) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <Card>
+      <CardHeader title={d.shopify.products} description={description} />
+      {rows.length === 0 ? (
+        <CardBody>
+          <p className="text-sm text-ink-2">{d.shopify.noProducts}</p>
+        </CardBody>
+      ) : (
+        <>
+          <DataList label={d.shopify.products} className="mt-2">
+            {rows.map(({ product, perf: p }) => (
               <DataListItem
                 key={product.id}
                 leading={<ProductSwatch product={product} />}
                 title={product.title}
-                subtitle={product.status !== "ACTIVE" ? dict.shopify.productStatus[product.status] : undefined}
+                subtitle={product.status !== "ACTIVE" ? d.shopify.productStatus[product.status] : undefined}
                 aside={<StockBadge inventory={product.inventory} i18n={i18n} />}
               >
                 <MetricGrid
                   columns={2}
                   items={[
-                    { label: c.price, value: fmt.currency(product.priceMinor, product.currency) },
-                    { label: c.inventory, value: fmt.number(product.inventory) },
-                    { label: c.unitsSold, value: fmt.number(p?.unitsSold ?? 0) },
-                    { label: c.revenue, value: fmt.currency(p?.revenueMinor ?? 0, product.currency) },
+                    { label: c.price, value: f.currency(product.priceMinor, product.currency) },
+                    { label: c.inventory, value: stock(product) },
+                    { label: c.unitsSold, value: f.number(p?.unitsSold ?? 0) },
+                    { label: c.revenue, value: f.currency(p?.revenueMinor ?? 0, product.currency) },
                   ]}
                 />
               </DataListItem>
             ))}
           </DataList>
           <div className="hidden pt-4 md:block">
-            <TableContainer label={dict.shopify.products} stickyFirstColumn>
+            <TableContainer label={d.shopify.products} stickyFirstColumn>
               <thead>
                 <tr>
                   <Th>{c.product}</Th>
@@ -175,7 +268,7 @@ async function ShopifyContent({ i18n }: { i18n: ServerI18n }) {
                 </tr>
               </thead>
               <tbody>
-                {productRows.map(({ product, perf: p }) => (
+                {rows.map(({ product, perf: p }) => (
                   <tr key={product.id}>
                     <Td className="min-w-48 lg:min-w-52">
                       <div className="flex items-center gap-3">
@@ -183,43 +276,82 @@ async function ShopifyContent({ i18n }: { i18n: ServerI18n }) {
                         <div className="min-w-0">
                           <p className="truncate font-medium">{product.title}</p>
                           {product.status !== "ACTIVE" ? (
-                            <p className="text-xs text-ink-2">{dict.shopify.productStatus[product.status]}</p>
+                            <p className="text-xs text-ink-2">{d.shopify.productStatus[product.status]}</p>
                           ) : null}
                         </div>
                       </div>
                     </Td>
-                    <Td numeric>{fmt.currency(product.priceMinor, product.currency)}</Td>
+                    <Td numeric>{f.currency(product.priceMinor, product.currency)}</Td>
                     <Td numeric>
                       <span className="inline-flex items-center gap-1.5">
                         <StockBadge inventory={product.inventory} i18n={i18n} />
-                        {fmt.number(product.inventory)}
+                        {stock(product)}
                       </span>
                     </Td>
-                    <Td numeric>{fmt.number(p?.unitsSold ?? 0)}</Td>
-                    <Td numeric>{fmt.currency(p?.revenueMinor ?? 0, product.currency)}</Td>
+                    <Td numeric>{f.number(p?.unitsSold ?? 0)}</Td>
+                    <Td numeric>{f.currency(p?.revenueMinor ?? 0, product.currency)}</Td>
                   </tr>
                 ))}
               </tbody>
             </TableContainer>
           </div>
-        </Card>
+        </>
+      )}
+      {showBasis || !inventoryAvailable ? (
+        <ul className="list-disc space-y-1 px-4 pt-3 pb-4 ps-8 text-xs text-ink-2 sm:px-5 sm:ps-9">
+          {showBasis ? <li>{d.shopify.productsBasis}</li> : null}
+          {!inventoryAvailable ? <li>{d.shopify.inventoryHidden}</li> : null}
+        </ul>
+      ) : null}
+    </Card>
+  );
+}
 
-        <Card>
-          <CardHeader title={dict.shopify.recentOrders} />
+function OrdersCard({
+  orders,
+  now,
+  showCustomer,
+  showSource,
+  i18n,
+}: {
+  orders: ShopifyOrder[];
+  now: Date;
+  showCustomer: boolean;
+  showSource: boolean;
+  i18n: ServerI18n;
+}) {
+  const { dict, fmt } = i18n;
+  const c = dict.shopify.columns;
+  const testBadge = (order: ShopifyOrder) => (order.test ? <Badge tone="neutral">{dict.shopify.testOrder}</Badge> : null);
+  const subtitleParts = (order: ShopifyOrder) =>
+    [
+      showCustomer && order.customerLabel ? order.customerLabel : null,
+      fmt.relative(new Date(order.createdAt), now),
+      showSource && order.source ? dict.shopify.source[order.source] : null,
+    ].filter(Boolean);
+
+  return (
+    <Card>
+      <CardHeader title={dict.shopify.recentOrders} />
+      {orders.length === 0 ? (
+        <CardBody>
+          <p className="text-sm text-ink-2">{dict.shopify.noOrders}</p>
+        </CardBody>
+      ) : (
+        <>
           <DataList label={dict.shopify.recentOrders} className="mt-2">
             {orders.map((order) => (
               <DataListItem
                 key={order.id}
                 title={
-                  <span className="tabular" dir="ltr">
-                    {order.name}
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="tabular" dir="ltr">
+                      {order.name}
+                    </span>
+                    {testBadge(order)}
                   </span>
                 }
-                subtitle={
-                  <>
-                    {order.customerLabel} · {fmt.relative(new Date(order.createdAt), now)} · {dict.shopify.source[order.source]}
-                  </>
-                }
+                subtitle={subtitleParts(order).join(" · ")}
                 aside={
                   <>
                     <span className="tabular text-sm font-semibold text-ink">{fmt.currency(order.totalMinor, order.currency)}</span>
@@ -237,7 +369,7 @@ async function ShopifyContent({ i18n }: { i18n: ServerI18n }) {
                   <Th>{c.order}</Th>
                   <Th>{c.placed}</Th>
                   <Th>{c.payment}</Th>
-                  <Th>{c.source}</Th>
+                  {showSource ? <Th>{c.source}</Th> : null}
                   <Th numeric>{c.total}</Th>
                 </tr>
               </thead>
@@ -245,27 +377,30 @@ async function ShopifyContent({ i18n }: { i18n: ServerI18n }) {
                 {orders.map((order) => (
                   <tr key={order.id}>
                     <Td>
-                      <p className="tabular font-medium" dir="ltr">
-                        {order.name}
+                      <p className="inline-flex items-center gap-1.5 font-medium">
+                        <span className="tabular" dir="ltr">
+                          {order.name}
+                        </span>
+                        {testBadge(order)}
                       </p>
-                      <p className="text-xs text-ink-2">{order.customerLabel}</p>
+                      {showCustomer && order.customerLabel ? <p className="text-xs text-ink-2">{order.customerLabel}</p> : null}
                     </Td>
                     <Td className="whitespace-nowrap text-ink-2">{fmt.relative(new Date(order.createdAt), now)}</Td>
                     <Td>
                       <Badge tone={FINANCIAL_TONE[order.financialStatus]}>{dict.shopify.financial[order.financialStatus]}</Badge>
                       <p className="mt-1 text-xs text-ink-2">{dict.shopify.fulfillment[order.fulfillmentStatus]}</p>
                     </Td>
-                    <Td className="whitespace-nowrap text-ink-2">{dict.shopify.source[order.source]}</Td>
+                    {showSource ? (
+                      <Td className="whitespace-nowrap text-ink-2">{order.source ? dict.shopify.source[order.source] : dict.common.none}</Td>
+                    ) : null}
                     <Td numeric>{fmt.currency(order.totalMinor, order.currency)}</Td>
                   </tr>
                 ))}
               </tbody>
             </TableContainer>
           </div>
-        </Card>
-      </div>
-
-      <Notice>{dict.shopify.readOnly}</Notice>
-    </div>
+        </>
+      )}
+    </Card>
   );
 }

@@ -15,6 +15,20 @@ export const DOMAIN_ERROR_CODES = [
   "CREATIVE_NOT_READY",
   "CAMPAIGN_NOT_ACTIVE",
   "STORAGE_UNAVAILABLE",
+  /** Shopify app credentials (client id/secret/store domain) are not set. */
+  "SHOPIFY_NOT_CONFIGURED",
+  /** Connecting needs PostgreSQL + a valid CREDENTIALS_ENCRYPTION_KEY to store the token. */
+  "SHOPIFY_STORAGE_REQUIRED",
+  /** The dashboard was opened on a different address than APP_URL (OAuth would fail). */
+  "SHOPIFY_APP_URL_MISMATCH",
+  "SHOPIFY_NOT_CONNECTED",
+  /** Token revoked/expired beyond refresh, or the app was uninstalled. */
+  "SHOPIFY_RECONNECT_REQUIRED",
+  /** Shopify could not be reached or returned an error; nothing was changed. */
+  "SHOPIFY_UNAVAILABLE",
+  "SHOPIFY_MISSING_SCOPES",
+  /** The installed app was granted write access; phase 2 accepts read-only access only. */
+  "SHOPIFY_WRITE_SCOPES_GRANTED",
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];

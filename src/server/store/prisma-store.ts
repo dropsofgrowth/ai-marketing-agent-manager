@@ -4,8 +4,17 @@ import { OPEN_APPROVAL_STATUSES } from "@/domain/approvals/state-machine";
 import { DomainError } from "@/domain/errors";
 import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 
-import { toApproval, toAuditEntry, toAutomation, toCreative } from "./prisma-mappers";
-import { emptyStatusCounts, type DataStore } from "./types";
+import { toApproval, toAuditEntry, toAutomation, toConnection, toCreative } from "./prisma-mappers";
+import {
+  CURRENT_CONNECTION_STATUSES,
+  assertCiphertext,
+  emptyStatusCounts,
+  type ConnectionRepository,
+  type DataStore,
+} from "./types";
+
+/** Long enough for one token refresh round trip (with retries) while the row is locked. */
+const LOCK_TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 45_000 } as const;
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -18,6 +27,85 @@ function isUniqueViolation(error: unknown) {
 }
 
 function build(db: Db, root: PrismaClient): DataStore {
+  /** Runs `fn` in the current transaction, or opens one. */
+  const inTransaction = <T>(fn: (tx: Db) => Promise<T>, options?: { maxWait: number; timeout: number }) =>
+    db !== root ? fn(db) : root.$transaction((tx) => fn(tx), options);
+
+  const connections: ConnectionRepository = {
+    async getCurrent(workspaceId, provider) {
+      const row = await db.integrationConnection.findFirst({
+        where: { workspaceId, provider, status: { in: [...CURRENT_CONNECTION_STATUSES] } },
+        orderBy: { updatedAt: "desc" },
+      });
+      return row ? toConnection(row) : null;
+    },
+    async saveConnected(input) {
+      assertCiphertext(input.encryptedCredentials);
+      return inTransaction(async (tx) => {
+        // Revoke (and wipe) any other current connection first so the partial
+        // unique index "one current connection per provider" is never violated.
+        await tx.integrationConnection.updateMany({
+          where: {
+            workspaceId: input.workspaceId,
+            provider: input.provider,
+            status: { in: [...CURRENT_CONNECTION_STATUSES] },
+            OR: [{ externalAccountId: { not: input.externalAccountId } }, { externalAccountId: null }],
+          },
+          data: {
+            status: "REVOKED",
+            encryptedCredentials: null,
+            credentialsKeyVersion: null,
+            accessTokenExpiresAt: null,
+            refreshTokenExpiresAt: null,
+          },
+        });
+        const fields = {
+          status: "CONNECTED" as const,
+          displayName: input.displayName,
+          scopes: input.scopes,
+          encryptedCredentials: input.encryptedCredentials,
+          credentialsKeyVersion: input.credentialsKeyVersion,
+          accessTokenExpiresAt: input.accessTokenExpiresAt,
+          refreshTokenExpiresAt: input.refreshTokenExpiresAt,
+          connectedAt: input.connectedAt,
+          lastSyncedAt: input.lastSyncedAt,
+          lastError: null,
+        };
+        const row = await tx.integrationConnection.upsert({
+          where: {
+            workspaceId_provider_externalAccountId: {
+              workspaceId: input.workspaceId,
+              provider: input.provider,
+              externalAccountId: input.externalAccountId,
+            },
+          },
+          create: {
+            workspaceId: input.workspaceId,
+            provider: input.provider,
+            externalAccountId: input.externalAccountId,
+            ...fields,
+          },
+          update: fields,
+        });
+        return toConnection(row);
+      });
+    },
+    async update(workspaceId, id, patch) {
+      assertCiphertext(patch.encryptedCredentials);
+      const { count } = await db.integrationConnection.updateMany({ where: { workspaceId, id }, data: patch });
+      if (!count) return null;
+      const row = await db.integrationConnection.findFirst({ where: { workspaceId, id } });
+      return row ? toConnection(row) : null;
+    },
+    async withLock(workspaceId, id, fn) {
+      return inTransaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM integration_connections WHERE id = ${id} AND workspace_id = ${workspaceId} FOR UPDATE`;
+        const row = await tx.integrationConnection.findFirst({ where: { workspaceId, id } });
+        return fn(row ? toConnection(row) : null, build(tx, root).connections);
+      }, LOCK_TRANSACTION_OPTIONS);
+    },
+  };
+
   const store: DataStore = {
     kind: "postgres",
 
@@ -181,6 +269,8 @@ function build(db: Db, root: PrismaClient): DataStore {
         return rows.map(toAuditEntry);
       },
     },
+
+    connections,
 
     async transaction(fn) {
       if (db !== root) return fn(store); // already inside a transaction

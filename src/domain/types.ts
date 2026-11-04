@@ -199,6 +199,33 @@ export type AuditLogEntry = {
   createdAt: Date;
 };
 
+export const CONNECTION_STATUSES = ["NOT_CONFIGURED", "MOCK", "CONNECTED", "ERROR", "REVOKED"] as const;
+export type ConnectionStatus = (typeof CONNECTION_STATUSES)[number];
+
+/**
+ * A connected external account. `encryptedCredentials` is AES-256-GCM ciphertext
+ * and must only ever be decrypted server-side; never pass this type to the UI
+ * (use a view model without the ciphertext instead).
+ */
+export type IntegrationConnection = {
+  id: string;
+  workspaceId: string;
+  provider: IntegrationProviderId;
+  status: ConnectionStatus;
+  externalAccountId: string | null;
+  displayName: string | null;
+  scopes: string[];
+  encryptedCredentials: string | null;
+  credentialsKeyVersion: number | null;
+  accessTokenExpiresAt: Date | null;
+  refreshTokenExpiresAt: Date | null;
+  connectedAt: Date | null;
+  lastSyncedAt: Date | null;
+  lastError: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export const AUDIT_ACTIONS = [
   "approval.created",
   "approval.approved",
@@ -211,6 +238,10 @@ export const AUDIT_ACTIONS = [
   "automation.enabled",
   "automation.disabled",
   "automation.evaluated",
+  "integration.connected",
+  "integration.disconnected",
+  "integration.verified",
+  "integration.error",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

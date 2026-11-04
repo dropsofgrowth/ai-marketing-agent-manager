@@ -6,8 +6,10 @@ import { Suspense } from "react";
 
 import { RiskBadge, actorLabel, approvalHeadline, approvalSource } from "@/components/approvals/labels";
 import { BarList } from "@/components/charts/bar-list";
-import { TimeSeriesChart } from "@/components/charts/time-series-chart";
+import { DataSources } from "@/components/integrations/data-sources";
 import { IntegrationList } from "@/components/integrations/integration-list";
+import { RevenueChartCard } from "@/components/integrations/revenue-chart-card";
+import { StoreNotices } from "@/components/integrations/store-notices";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionSkeleton } from "@/components/ui/skeleton";
@@ -58,6 +60,7 @@ async function OverviewContent({ i18n }: { i18n: ServerI18n }) {
   ]);
   const campaigns = await loadCampaignRows(perf.range);
   const currency = perf.account.currency;
+  const storeCurrency = perf.shop?.currency ?? currency;
   const pct = (f: number) => fmt.percent(f, { signed: true });
   const vs = t(dict.common.vsPrevious, { n: DAYS });
 
@@ -68,10 +71,23 @@ async function OverviewContent({ i18n }: { i18n: ServerI18n }) {
 
   return (
     <div className="space-y-5 sm:space-y-6">
+      <DataSources store={perf.store.source} ads={perf.adsMode} i18n={i18n} />
+      <StoreNotices
+        source={perf.store.source}
+        complete={perf.store.complete}
+        comparable={perf.comparable}
+        showMixed
+        i18n={i18n}
+      />
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatTile
           label={dict.kpi.revenue}
-          value={fmt.currency(perf.kpis.revenue.value, currency, { compact: true })}
+          hint={perf.store.source.mode === "live" ? dict.kpi.revenueHintLive : undefined}
+          value={
+            perf.kpis.revenue.value === null
+              ? dict.common.none
+              : fmt.currency(perf.kpis.revenue.value, storeCurrency, { compact: true })
+          }
           delta={deltaOf(perf.kpis.revenue.delta, pct)}
           deltaLabel={vs}
           trend={perf.trends.revenue}
@@ -86,7 +102,7 @@ async function OverviewContent({ i18n }: { i18n: ServerI18n }) {
         />
         <StatTile
           label={dict.kpi.blendedRoas}
-          hint={dict.kpi.blendedRoasHint}
+          hint={perf.comparable ? dict.kpi.blendedRoasHint : dict.kpi.blendedRoasUnavailable}
           value={fmt.roas(perf.kpis.blendedRoas.value)}
           delta={deltaOf(perf.kpis.blendedRoas.delta, pct)}
           deltaLabel={vs}
@@ -94,7 +110,7 @@ async function OverviewContent({ i18n }: { i18n: ServerI18n }) {
         />
         <StatTile
           label={dict.kpi.orders}
-          value={fmt.number(perf.kpis.orders.value)}
+          value={perf.kpis.orders.value === null ? dict.common.none : fmt.number(perf.kpis.orders.value)}
           delta={deltaOf(perf.kpis.orders.delta, pct)}
           deltaLabel={vs}
           trend={perf.trends.orders}
@@ -102,20 +118,7 @@ async function OverviewContent({ i18n }: { i18n: ServerI18n }) {
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <Card className="xl:col-span-2">
-          <CardHeader title={dict.charts.revenueVsSpend} description={dict.charts.revenueVsSpendDesc} />
-          <CardBody>
-            <TimeSeriesChart
-              title={dict.charts.revenueVsSpend}
-              dates={perf.sales.map((d) => d.date)}
-              format={{ kind: "currency", currency }}
-              series={[
-                { id: "revenue", label: dict.charts.series.revenue, color: "series-1", values: perf.sales.map((d) => d.revenueMinor) },
-                { id: "spend", label: dict.charts.series.spend, color: "series-2", values: perf.ads.map((d) => d.spendMinor) },
-              ]}
-            />
-          </CardBody>
-        </Card>
+        <RevenueChartCard perf={perf} i18n={i18n} className="xl:col-span-2" />
 
         <Card>
           <CardHeader
@@ -183,7 +186,7 @@ async function OverviewContent({ i18n }: { i18n: ServerI18n }) {
         <Card>
           <CardHeader title={dict.overview.integrations} />
           <CardBody>
-            <IntegrationList statuses={getIntegrationStatuses()} i18n={i18n} />
+            <IntegrationList statuses={await getIntegrationStatuses()} i18n={i18n} />
           </CardBody>
         </Card>
 

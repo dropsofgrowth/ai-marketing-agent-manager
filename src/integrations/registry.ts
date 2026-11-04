@@ -4,12 +4,14 @@ import { MockHiggsfieldService } from "@/integrations/higgsfield/mock";
 import type { HiggsfieldService } from "@/integrations/higgsfield/types";
 import { MockMetaAdsService } from "@/integrations/meta-ads/mock";
 import type { MetaAdsService } from "@/integrations/meta-ads/types";
-import { MockShopifyService } from "@/integrations/shopify/mock";
-import type { ShopifyService } from "@/integrations/shopify/types";
 
+/**
+ * Adapters that don't depend on a stored connection. Shopify is resolved per
+ * workspace from its OAuth connection instead — see
+ * `src/server/integrations/shopify` (`getShopifySource`).
+ */
 export type Integrations = {
   metaAds: MetaAdsService;
-  shopify: ShopifyService;
   higgsfield: HiggsfieldService;
 };
 
@@ -18,15 +20,13 @@ const globalForIntegrations = globalThis as unknown as { __integrations?: Integr
 /**
  * Resolves the adapter for each provider.
  *
- * Phase 1: every provider resolves to its MOCK adapter, even when credentials are
- * present in the environment — live adapters have not been implemented or
- * reviewed yet. When they are, selection happens here, gated on validated
- * credentials and an explicit per-provider opt-in.
+ * Meta Ads and Higgsfield still resolve to their MOCK adapters, even when
+ * credentials are present in the environment — their live adapters have not been
+ * implemented or reviewed yet.
  */
 export function getIntegrations(): Integrations {
   globalForIntegrations.__integrations ??= {
     metaAds: new MockMetaAdsService(),
-    shopify: new MockShopifyService(),
     higgsfield: new MockHiggsfieldService(),
   };
   return globalForIntegrations.__integrations;

@@ -10,7 +10,9 @@ export type SuccessCode =
   | "EXECUTION_FAILED"
   | "CREATIVE_GENERATED"
   | "AUTOMATION_TOGGLED"
-  | "AUTOMATIONS_EVALUATED";
+  | "AUTOMATIONS_EVALUATED"
+  | "SHOPIFY_VERIFIED"
+  | "SHOPIFY_DISCONNECTED";
 
 export type ErrorCode = DomainErrorCode | "UNEXPECTED";
 

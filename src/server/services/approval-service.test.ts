@@ -5,7 +5,6 @@ import type { Actor } from "@/domain/types";
 import { MockHiggsfieldService } from "@/integrations/higgsfield/mock";
 import { MockMetaAdsService } from "@/integrations/meta-ads/mock";
 import type { Integrations } from "@/integrations/registry";
-import { MockShopifyService } from "@/integrations/shopify/mock";
 import { createApprovalService, type ApprovalConfig } from "@/server/services/approvals";
 import { createAutomationService } from "@/server/services/automations";
 import { createCreativeService } from "@/server/services/creatives";
@@ -45,7 +44,6 @@ describe("approval service", () => {
     store = createMemoryStore({ ...buildDemoData(NOW), approvals: [], audit: [] });
     integrations = {
       metaAds: new MockMetaAdsService(),
-      shopify: new MockShopifyService(),
       higgsfield: new MockHiggsfieldService(),
     };
   });
@@ -187,7 +185,6 @@ describe("automation service", () => {
     const store = createMemoryStore({ ...buildDemoData(NOW), approvals: [], audit: [] });
     const integrations: Integrations = {
       metaAds: new MockMetaAdsService(),
-      shopify: new MockShopifyService(),
       higgsfield: new MockHiggsfieldService(),
     };
     const budgetSpy = vi.spyOn(integrations.metaAds, "updateCampaignBudget");

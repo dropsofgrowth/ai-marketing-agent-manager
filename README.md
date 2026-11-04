@@ -4,11 +4,12 @@ A dashboard for running Meta Ads, a Shopify store and AI-generated creatives (Hi
 from one place — in **English and Arabic (RTL)** — where **every budget change and every creative
 publish must be approved by a person** before anything runs.
 
-> **Status: Phase 2 — responsive, installable dashboard.** Works on iPhone, Android, tablets,
-> Windows and Mac, in English and Arabic, and installs as an app (PWA). All three integrations
-> still run on **deterministic mock data**: no request is sent to Meta, Shopify or Higgsfield,
-> no live integration is complete, and approved changes can only be executed as **simulations**.
-> Live adapters require real credentials, API permissions and review
+> **Status: Phase 2 — responsive, installable dashboard + read-only Shopify.** Works on iPhone,
+> Android, tablets, Windows and Mac, in English and Arabic, and installs as an app (PWA).
+> **Shopify** can be connected **read-only** (OAuth authorization code grant, encrypted tokens) —
+> see **[docs/SHOPIFY.md](docs/SHOPIFY.md)**; it is tested against a simulated Shopify but not yet
+> against the real API. **Meta Ads and Higgsfield** still run on deterministic mock data, and
+> approved changes can only be executed as **simulations**
 > (see [Roadmap](#roadmap-to-live-integrations)).
 
 ## What's included
@@ -104,6 +105,7 @@ For a shared preview deployment:
 | `npm test` | Unit tests (Vitest). `npm run test:watch` for watch mode. |
 | `npm run check` | lint + typecheck + tests. |
 | `npm run test:responsive` | Responsive + PWA smoke test against a running server (`BASE_URL`, optional `BASIC_AUTH=user:pass`, `SCREENSHOTS=dir`). First run: `npx playwright install chromium`. |
+| `npm run test:shopify-flow` | End-to-end Shopify connect flow against a simulated Shopify (see [docs/SHOPIFY.md](docs/SHOPIFY.md#8-tests)). |
 | `npm run pwa:assets` | Regenerate PWA icons and `public/offline.html` (after changing the logo or the `offline` strings). |
 | `npm run db:migrate` | Create/apply migrations in development. |
 | `npm run db:deploy` | Apply committed migrations (CI/production). |
@@ -125,7 +127,9 @@ See [`.env.example`](.env.example) for the full, commented template. Never commi
 | `BUDGET_MAX_DAILY_AMOUNT` | No | Daily budget ceiling in major units (default 5000). |
 | `APPROVAL_TTL_HOURS` | No | Pending requests expire after this (default 72). |
 | `REQUIRE_SEPARATE_APPROVER` | No | Four-eyes rule. Recommended `true` once real users exist. |
-| `META_*`, `SHOPIFY_*`, `HIGGSFIELD_*` | No | Placeholders for Phase 2. Settings shows whether they're present (never their values); they do **not** switch on live data. |
+| `SHOPIFY_CLIENT_ID` / `_SECRET` / `_STORE_DOMAIN` | For Shopify | Dev Dashboard app credentials + the one store to connect. Read-only. See [docs/SHOPIFY.md](docs/SHOPIFY.md). |
+| `SHOPIFY_API_VERSION` | No | Pinned Admin API version (default `2026-10`). |
+| `META_*`, `HIGGSFIELD_*` | No | Placeholders. Settings shows whether they're present (never their values); they do **not** switch on live data. |
 
 ## How the approval workflow keeps you safe
 
@@ -231,10 +235,13 @@ Nothing below is done yet. Each step needs real credentials, the right API permi
    enable `REQUIRE_SEPARATE_APPROVER`.
 2. **Meta Ads (read)** — a `LiveMetaAdsService` implementing `MetaAdsService` via the Marketing API
    (`ads_read`), with rate-limit handling and caching; select it in `integrations/registry.ts`.
-3. **Shopify (read)** — Admin GraphQL API adapter with read scopes; webhooks for orders.
+3. **Shopify (read)** — *implemented (Phase 2)*: OAuth authorization code grant with expiring,
+   rotating tokens stored encrypted; read-only GraphQL adapter for shop, products, orders and daily
+   sales ([docs/SHOPIFY.md](docs/SHOPIFY.md)). Still to do: first run against the real store,
+   `app/uninstalled` webhook, sessions/conversion (needs Shopify analytics access).
 4. **Higgsfield** — generation jobs, polling/webhooks, asset storage.
-5. **Credential storage** — OAuth/token flows that save encrypted tokens in
-   `integration_connections` using `encryptSecret()`.
+5. **Credential storage** — done for Shopify (`integration_connections`, AES-256-GCM, DB constraints);
+   reuse it for Meta and Higgsfield.
 6. **Live execution (writes)** — only after the above: `ads_management` permission, idempotency
    keys, reconciliation for stuck `EXECUTING` requests, then relax the `dryRun: true` type and the
    `SIMULATED`-only DB constraint in a reviewed migration.

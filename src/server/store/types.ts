@@ -4,8 +4,11 @@ import type {
   ApprovalType,
   AuditLogEntry,
   Automation,
+  ConnectionStatus,
   Creative,
   CreativeStatus,
+  IntegrationConnection,
+  IntegrationProviderId,
 } from "@/domain/types";
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -82,6 +85,68 @@ export interface AuditRepository {
   list(workspaceId: string, options?: { limit?: number }): Promise<AuditLogEntry[]>;
 }
 
+/** Statuses that make a connection the workspace's current one for its provider. */
+export const CURRENT_CONNECTION_STATUSES: readonly ConnectionStatus[] = ["CONNECTED", "ERROR"];
+
+export type SaveConnectionInput = {
+  workspaceId: string;
+  provider: IntegrationProviderId;
+  externalAccountId: string;
+  displayName: string | null;
+  scopes: string[];
+  /** Ciphertext from encryptSecret(); the store rejects anything else. */
+  encryptedCredentials: string;
+  credentialsKeyVersion: number;
+  accessTokenExpiresAt: Date | null;
+  refreshTokenExpiresAt: Date | null;
+  connectedAt: Date;
+  lastSyncedAt: Date;
+};
+
+export type ConnectionPatch = Partial<
+  Pick<
+    IntegrationConnection,
+    | "status"
+    | "displayName"
+    | "scopes"
+    | "encryptedCredentials"
+    | "credentialsKeyVersion"
+    | "accessTokenExpiresAt"
+    | "refreshTokenExpiresAt"
+    | "lastSyncedAt"
+    | "lastError"
+  >
+>;
+
+export interface ConnectionRepository {
+  /** The current (CONNECTED or ERROR) connection for a provider, if any. */
+  getCurrent(workspaceId: string, provider: IntegrationProviderId): Promise<IntegrationConnection | null>;
+  /**
+   * Atomically stores a freshly authorized connection as CONNECTED. Any other
+   * current connection for the same provider is revoked and its credentials wiped.
+   */
+  saveConnected(input: SaveConnectionInput): Promise<IntegrationConnection>;
+  update(workspaceId: string, id: string, patch: ConnectionPatch): Promise<IntegrationConnection | null>;
+  /**
+   * Runs `fn` while holding an exclusive lock on the connection row
+   * (`SELECT … FOR UPDATE` in PostgreSQL) so only one server instance refreshes a
+   * rotating token at a time. `fn` receives the row as re-read under the lock and
+   * a repository bound to the same transaction.
+   */
+  withLock<T>(
+    workspaceId: string,
+    id: string,
+    fn: (current: IntegrationConnection | null, tx: ConnectionRepository) => Promise<T>,
+  ): Promise<T>;
+}
+
+/** Defense in depth (mirrors the DB CHECK): only versioned ciphertext may be stored. */
+export function assertCiphertext(value: string | null | undefined): void {
+  if (value !== null && value !== undefined && !/^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value)) {
+    throw new Error("Refusing to store credentials that are not encrypted.");
+  }
+}
+
 export type StoreKind = "postgres" | "memory";
 
 export interface DataStore {
@@ -90,6 +155,7 @@ export interface DataStore {
   readonly creatives: CreativeRepository;
   readonly automations: AutomationRepository;
   readonly audit: AuditRepository;
+  readonly connections: ConnectionRepository;
   /** Runs `fn` atomically (a database transaction for Postgres). */
   transaction<T>(fn: (tx: DataStore) => Promise<T>): Promise<T>;
   /** Throws when the backing store is unreachable. */
