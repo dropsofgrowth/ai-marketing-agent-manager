@@ -7,6 +7,7 @@ import type { DailySales, ShopifyCapabilities, ShopifyShop } from "@/integration
 import { previousRange, trailingRange, type DateRange } from "@/lib/dates";
 import { averageOf, bucketSeries, deriveMetrics, pooledRatioOf, relativeDelta, sumMetrics } from "@/lib/metrics";
 import { getCurrentActor } from "@/server/auth/actor";
+import { requireDashboardAccess } from "@/server/auth/dashboard-access";
 import { getShopifySource, toShopifyErrorCode } from "@/server/integrations/shopify";
 import { log } from "@/server/logging";
 import { getStore } from "@/server/store";
@@ -35,6 +36,7 @@ const nanSeries = () => Array.from({ length: TREND_POINTS }, () => Number.NaN);
 
 /** Meta Ads delivery for a trailing window (+ the previous window for deltas). Never touches Shopify. */
 export async function loadAdPerformance(days: number, now: Date) {
+  await requireDashboardAccess();
   const { metaAds } = getIntegrations();
   const range = trailingRange(days, now);
   const prev = previousRange(range);

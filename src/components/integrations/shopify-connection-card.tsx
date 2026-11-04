@@ -99,6 +99,9 @@ export function ShopifyConnectionCard({
         {view.state === "not_configured" ? (
           <Notice tone="warning">{richT(s.notConfigured, { vars: <Code>{view.missing.join(", ")}</Code> })}</Notice>
         ) : null}
+        {view.state === "auth_required" ? (
+          <Notice tone="warning">{richT(s.authRequired, { vars: <Code>{view.missing.join(", ")}</Code> })}</Notice>
+        ) : null}
         {view.state === "storage_required" ? (
           <Notice tone="warning">{richT(s.storageRequired, { vars: <Code>{view.missing.join(", ")}</Code> })}</Notice>
         ) : null}

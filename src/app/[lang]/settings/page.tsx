@@ -16,7 +16,7 @@ import { isShopifyConnectResult } from "@/domain/shopify-connect";
 import { LOCALE_NAMES } from "@/i18n/config";
 import { getI18n, type ServerI18n } from "@/i18n/server";
 import { getCurrentActor } from "@/server/auth/actor";
-import { getEnv } from "@/server/env";
+import { getDashboardAuth, getEnv } from "@/server/env";
 import { getShopifyConnectionView } from "@/server/integrations/shopify";
 import { getIntegrationStatuses } from "@/server/queries/integrations";
 import { getApprovalConfig } from "@/server/services";
@@ -162,7 +162,7 @@ async function SettingsContent({
           <CardBody className="space-y-4">
             <dl className="divide-y divide-line">
               <Row label={s.basicAuth}>
-                <YesNo ok={Boolean(env.DASHBOARD_BASIC_AUTH_USER && env.DASHBOARD_BASIC_AUTH_PASSWORD)} yes={s.configured} no={s.notConfigured} />
+                <YesNo ok={getDashboardAuth(env).mode === "required"} yes={s.configured} no={s.notConfigured} />
               </Row>
               <Row label={s.encryptionKey}>
                 <YesNo ok={Boolean(env.CREDENTIALS_ENCRYPTION_KEY)} yes={s.configured} no={s.notConfigured} />

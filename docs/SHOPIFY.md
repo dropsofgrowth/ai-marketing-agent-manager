@@ -60,7 +60,7 @@ them into chat, an issue or a pull request, and never commit them.
 | `APP_URL` | No | The dashboard's public **https** address (no trailing path). | `https://agent.dropsofgrowth.com` |
 | `DATABASE_URL` | **Yes** | Your PostgreSQL provider (e.g. Neon). Tokens are stored here, encrypted. | — |
 | `CREDENTIALS_ENCRYPTION_KEY` | **Yes** | Generate once: `openssl rand -base64 32`. Losing it means reconnecting Shopify. | — |
-| `DASHBOARD_BASIC_AUTH_USER` / `_PASSWORD` | **Yes** (password) | Choose them. Strongly recommended until real sign-in exists. | — |
+| `DASHBOARD_BASIC_AUTH_USER` / `_PASSWORD` | **Yes** (password) | **Required**: production refuses all requests without them, and Shopify won't connect or show live data without them in any environment. Password ≥ 12 characters. | — |
 
 The Settings page shows which of these are **missing by name** (never their values).
 
@@ -134,9 +134,12 @@ well inside Shopify's rate limits; each page view reads at most 20 pages of orde
   Token-shaped strings and secret-named fields are stripped (`src/server/logging.ts`).
 - **Read-only:** `assertReadOnlyDocument` blocks `mutation`/`subscription`; tokens with
   `write_*` scopes are refused at connect and revoked on verify.
-- **Access:** with Basic Auth on, every page, server action and API route — including the
-  OAuth callback — requires the password (`npm run test:auth-gate` checks it). Connect,
-  verify and disconnect also require the owner/admin role in the service layer.
+- **Access (fail closed):** the dashboard password is mandatory in production and for live
+  store data everywhere. It is checked in the proxy for every page, server action and API
+  route (incl. the OAuth callback), and **again server-side** in `getCurrentActor()`, so a
+  request that slips past the proxy still gets no identity and no data. Connect, verify and
+  disconnect also require the owner/admin role. `npm run test:auth-gate` checks both the
+  "credentials required" and the "fail closed" behaviour.
 - **Audit log:** connected / verified / disconnected / needs-attention events.
 
 ## 7. Troubleshooting (result codes on the Settings page)
@@ -177,11 +180,12 @@ End-to-end connect flow with a **simulated** Shopify (no request reaches Shopify
 npm run build
 APP_URL=http://localhost:3101 DATABASE_URL=postgresql://… CREDENTIALS_ENCRYPTION_KEY=$(openssl rand -base64 32) \
 SHOPIFY_CLIENT_ID=e2e-id SHOPIFY_CLIENT_SECRET=e2e-secret SHOPIFY_STORE_DOMAIN=demo-e2e.myshopify.com \
+DASHBOARD_BASIC_AUTH_USER=e2e DASHBOARD_BASIC_AUTH_PASSWORD=e2e-test-password \
 E2E_FAKE_SHOPIFY=1 NODE_OPTIONS="--import ./e2e/fake-shopify-preload.mjs" npx next start -p 3101
 ```
 
 ```bash
-BASE_URL=http://localhost:3101 SHOPIFY_STORE_DOMAIN=demo-e2e.myshopify.com SHOPIFY_CLIENT_SECRET=e2e-secret npm run test:shopify-flow
+BASE_URL=http://localhost:3101 BASIC_AUTH=e2e:e2e-test-password SHOPIFY_STORE_DOMAIN=demo-e2e.myshopify.com SHOPIFY_CLIENT_SECRET=e2e-secret npm run test:shopify-flow
 ```
 
 The fake only loads with `E2E_FAKE_SHOPIFY=1` and a store domain ending in

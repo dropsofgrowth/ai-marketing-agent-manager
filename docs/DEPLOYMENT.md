@@ -21,10 +21,14 @@ options give you HTTPS automatically.
 
 ---
 
-## Before you start: protect the preview
+## Before you start: set the dashboard password (required)
 
-There is no user sign-in yet, so anyone with the link could use the dashboard. Turn on
-the app's built-in password (HTTP Basic Auth) for every deployment:
+There is no per-user sign-in yet, so the dashboard is protected by one shared password
+(HTTP Basic Auth). **It is mandatory in production:** a production build (`next start`,
+Vercel, Render) **refuses every request with 503** until both variables below are set
+and valid (username without `:`, password of at least 12 characters). This is checked
+twice — in the proxy and again on the server for every page, action and API route — and
+live Shopify data additionally requires it in every environment.
 
 ```bash
 # Pick a username, and generate a long random password:
@@ -33,15 +37,25 @@ openssl rand -base64 24
 
 | Variable | Value |
 | --- | --- |
-| `DASHBOARD_BASIC_AUTH_USER` | e.g. `preview` |
-| `DASHBOARD_BASIC_AUTH_PASSWORD` | the generated password |
+| `DASHBOARD_BASIC_AUTH_USER` | e.g. `preview` (required; no `:`) |
+| `DASHBOARD_BASIC_AUTH_PASSWORD` | the generated password (required; ≥ 12 characters) |
 | `LIVE_EXECUTION_ENABLED` | `false` |
 | `DEFAULT_LOCALE` | `en` or `ar` |
+
+Limits of a shared password (until per-user sign-in exists):
+
+- **Use a long random password** (the command above) — the app doesn't throttle wrong
+  guesses, so add rate limiting at the platform if you can (e.g. a Vercel Firewall rule
+  for repeated 401s).
+- **HTTPS only** — Basic Auth sends the password with every request; Vercel, Render and
+  the tunnel below all use HTTPS.
+- **Everyone with the password acts as the owner**, and the audit log can't tell people
+  apart. Share it only with people who may approve changes; rotate it when someone leaves.
 
 Leave every `META_*` and `HIGGSFIELD_*` variable **empty**. Add `SHOPIFY_*` only when
 you are ready to connect the store (see [docs/SHOPIFY.md](SHOPIFY.md)).
 
-Basic Auth protects every page, server action and API route (including the Shopify
+The password protects every page, server action and API route (including the Shopify
 OAuth callback). The web-app manifest, icons, `/sw.js`, `/offline.html`, Next.js
 static assets and `/api/health` stay public on purpose: browsers fetch manifests
 without credentials, and none of these files contain data. `npm run test:auth-gate`

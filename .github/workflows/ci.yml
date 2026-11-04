@@ -112,12 +112,30 @@ jobs:
           fi
           kill %1 || true
 
-      - name: Responsive + PWA smoke test (demo mode, 9 viewports × 2 languages)
+      - name: Production fails closed without valid dashboard credentials
+        run: |
+          # Wait for any HTTP answer: a fail-closed server's health probe is (correctly) 503.
+          wait_up() { for i in $(seq 1 60); do curl -s -o /dev/null "http://localhost:$1/api/health" && return 0; sleep 1; done; return 1; }
+          # 1) credentials missing entirely
+          env -u SHOPIFY_CLIENT_ID npx next start -p 3200 > "$RUNNER_TEMP/server-no-auth.log" 2>&1 &
+          wait_up 3200
+          BASE_URL=http://localhost:3200 EXPECT=fail-closed npm run test:auth-gate
+          # 2) invalid credentials (password too short)
+          DASHBOARD_BASIC_AUTH_USER=ci-owner DASHBOARD_BASIC_AUTH_PASSWORD=tooShort9x npx next start -p 3201 > "$RUNNER_TEMP/server-bad-auth.log" 2>&1 &
+          wait_up 3201
+          BASE_URL=http://localhost:3201 EXPECT=fail-closed npm run test:auth-gate
+          if grep -h "tooShort9x" "$RUNNER_TEMP/server-bad-auth.log"; then echo "::error::The password value appeared in the log"; exit 1; fi
+          kill %1 %2 || true
+
+      - name: Responsive + PWA smoke test (demo data, behind the dashboard password, 9 viewports × 2 languages)
+        env:
+          DASHBOARD_BASIC_AUTH_USER: ci-owner
+          DASHBOARD_BASIC_AUTH_PASSWORD: ci-throwaway-basic-auth-password
         run: |
           env -u DATABASE_URL -u SHOPIFY_CLIENT_ID -u SHOPIFY_CLIENT_SECRET -u SHOPIFY_STORE_DOMAIN -u APP_URL \
             npx next start -p 3000 > "$RUNNER_TEMP/server-demo.log" 2>&1 &
           for i in $(seq 1 60); do curl -sf http://localhost:3000/api/health > /dev/null && break; sleep 1; done
-          BASE_URL=http://localhost:3000 npm run test:responsive
+          BASE_URL=http://localhost:3000 BASIC_AUTH="${DASHBOARD_BASIC_AUTH_USER}:${DASHBOARD_BASIC_AUTH_PASSWORD}" npm run test:responsive
           kill %1 || true
 
       - name: Upload server logs (only fake test values)

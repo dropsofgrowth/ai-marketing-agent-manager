@@ -24,7 +24,7 @@ publish must be approved by a person** before anything runs.
 | **Approval workflow** | Budget changes and creative publishing: request → approve/reject → explicit simulated run. Guardrails, risk levels, expiry, optimistic locking, audit log. |
 | **Automations** | "Scale winners" / "Trim losers" rules that **only propose** changes as pending approvals. |
 | **Data** | PostgreSQL + Prisma 7 schema and migration (with safety CHECK constraints), seed data. Falls back to an in-memory demo store when `DATABASE_URL` is unset. |
-| **Security** | Validated server-only env, AES-256-GCM helper for credentials at rest, optional HTTP Basic Auth, security headers, zod-validated server actions with role checks. |
+| **Security** | Validated server-only env, AES-256-GCM helper for credentials at rest, mandatory dashboard password in production (fail closed, checked in the proxy and again server-side), security headers, zod-validated server actions with role checks. |
 | **Quality** | ESLint, strict TypeScript, 49 unit tests (Vitest), a responsive/PWA smoke test across 9 device profiles × 2 languages (Playwright). |
 
 ## Tech stack
@@ -89,8 +89,10 @@ npm start                  # http://localhost:3000
 
 For a shared preview deployment:
 
-- Set `DASHBOARD_BASIC_AUTH_USER` and `DASHBOARD_BASIC_AUTH_PASSWORD` — every page and server
-  action then requires them (there is **no user sign-in yet**; everyone acts as the demo owner).
+- Set `DASHBOARD_BASIC_AUTH_USER` and `DASHBOARD_BASIC_AUTH_PASSWORD` (password ≥ 12 characters) —
+  **required**: a production build answers every request with 503 until they are set and valid.
+  Every page, server action and API route then requires them (there is **no per-user sign-in yet**;
+  everyone with the password acts as the demo owner). `npm run dev` runs without them for local work.
 - Use `npm run db:deploy` (not `db:migrate`) to apply migrations in non-development environments.
 - `/api/health` stays public for load-balancer checks and reveals no configuration.
 
@@ -106,7 +108,7 @@ For a shared preview deployment:
 | `npm run check` | lint + typecheck + tests. |
 | `npm run test:responsive` | Responsive + PWA smoke test against a running server (`BASE_URL`, optional `BASIC_AUTH=user:pass`, `SCREENSHOTS=dir`). First run: `npx playwright install chromium`. |
 | `npm run test:shopify-flow` | End-to-end Shopify connect flow against a simulated Shopify (see [docs/SHOPIFY.md](docs/SHOPIFY.md#8-tests)). Optional `BASIC_AUTH=user:pass`. |
-| `npm run test:auth-gate` | With `DASHBOARD_BASIC_AUTH_*` set on the server: checks every page, dotted path, server action and API route needs the password while PWA files stay public (`BASE_URL`, `BASIC_AUTH=user:pass`). |
+| `npm run test:auth-gate` | Against a production server: with `DASHBOARD_BASIC_AUTH_*` set (`BASIC_AUTH=user:pass`), every page, dotted path, server action and API route needs the password, spoofed internal headers don't bypass it, and PWA files stay public; with them missing/invalid (`EXPECT=fail-closed`), everything is refused with 503. |
 | `npm run pwa:assets` | Regenerate PWA icons and `public/offline.html` (after changing the logo or the `offline` strings). |
 | `npm run db:migrate` | Create/apply migrations in development. |
 | `npm run db:deploy` | Apply committed migrations (CI/production). |
@@ -121,7 +123,8 @@ and no repository secrets:
 - **check** — `npm run check` (lint, typecheck, unit tests) and `npm run build`;
 - **integration** — PostgreSQL 16 service: migrations, schema-drift check, seed, repository tests; then the
   Shopify connect flow against a *simulated* Shopify with Basic Auth on (fails if a token/secret/code reaches
-  the server log or a GraphQL mutation is sent), the Basic Auth gate check, and the responsive + PWA smoke test.
+  the server log or a GraphQL mutation is sent), the access-gate check, a fail-closed check (production with
+  missing and with invalid credentials), and the responsive + PWA smoke test behind the password.
 
 ## Environment variables
 
@@ -131,7 +134,7 @@ See [`.env.example`](.env.example) for the full, commented template. Never commi
 | --- | --- | --- |
 | `DATABASE_URL` | No | PostgreSQL URL. Empty → in-memory demo store. |
 | `CREDENTIALS_ENCRYPTION_KEY` | For storing credentials | 32-byte base64 key (`openssl rand -base64 32`). |
-| `DASHBOARD_BASIC_AUTH_USER` / `_PASSWORD` | Recommended for previews | Enables HTTP Basic Auth on all pages and actions. |
+| `DASHBOARD_BASIC_AUTH_USER` / `_PASSWORD` | **Yes, in production** | Dashboard password (HTTP Basic Auth), password ≥ 12 characters. Missing/invalid → every request gets 503 (fail closed). Also required for live Shopify data in any environment. |
 | `DEFAULT_LOCALE` | No | `en` (default) or `ar`. |
 | `LIVE_EXECUTION_ENABLED` | No | Keep `false`. No live adapters exist; if `true`, runs are still simulated and flagged. |
 | `BUDGET_MAX_INCREASE_PERCENT` / `_DECREASE_PERCENT` | No | Per-request limits (defaults 50 / 80). |
@@ -184,7 +187,7 @@ src/
     page.tsx               Overview
     meta-ads/ shopify/ creatives/ analytics/ automations/ approvals/ settings/
   app/api/health/          Health probe
-  proxy.ts                 Locale redirect + optional Basic Auth (Next 16 "proxy")
+  proxy.ts                 Locale redirect + mandatory dashboard password (Next 16 "proxy")
   components/              UI (ui/, layout/, charts/, approvals/, creatives/, automations/, settings/)
   lib/pwa/                 Manifest builder + client-side install/service-worker helpers
   domain/                  Framework-free business rules: types, state machine, guardrails,
@@ -227,7 +230,7 @@ src/
   It is registered only in production builds on HTTPS/localhost.
 - **Install UI:** Settings → *App & display* shows an Install button (Chrome/Edge/Android), Share → Add to
   Home Screen steps on iPhone/iPad, or an "already installed" state.
-- Manifest, icons, `sw.js` and `offline.html` are outside the Basic Auth matcher (they contain no data).
+- Manifest, icons, `sw.js` and `offline.html` are outside the password gate (they contain no data).
 
 ## Internationalization
 

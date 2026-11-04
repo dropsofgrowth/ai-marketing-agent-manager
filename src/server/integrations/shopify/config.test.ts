@@ -18,6 +18,8 @@ const base = {
   SHOPIFY_CLIENT_SECRET: "secret",
   SHOPIFY_STORE_DOMAIN: "drops-of-growth.myshopify.com",
   SHOPIFY_API_VERSION: "2026-10",
+  DASHBOARD_BASIC_AUTH_USER: "owner",
+  DASHBOARD_BASIC_AUTH_PASSWORD: "a-long-test-password",
 } as unknown as ServerEnv;
 
 describe("Shopify readiness", () => {
@@ -44,6 +46,14 @@ describe("Shopify readiness", () => {
       reason: "storage_required",
       missing: ["CREDENTIALS_ENCRYPTION_KEY"],
     });
+  });
+
+  it("never serves live store data without the dashboard password — in any environment", () => {
+    const expected = { ready: false, reason: "auth_required", missing: ["DASHBOARD_BASIC_AUTH_USER", "DASHBOARD_BASIC_AUTH_PASSWORD"] };
+    const noAuth = { ...base, DASHBOARD_BASIC_AUTH_USER: undefined, DASHBOARD_BASIC_AUTH_PASSWORD: undefined };
+    expect(getShopifyReadiness(noAuth, "postgres")).toEqual(expected);
+    expect(getShopifyReadiness({ ...noAuth, NODE_ENV: "development" }, "postgres")).toEqual(expected); // dev "open" mode too
+    expect(getShopifyReadiness({ ...base, DASHBOARD_BASIC_AUTH_PASSWORD: "short" }, "postgres")).toEqual(expected);
   });
 
   it("requires https except on localhost", () => {

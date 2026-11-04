@@ -15,6 +15,10 @@ export const DOMAIN_ERROR_CODES = [
   "CREATIVE_NOT_READY",
   "CAMPAIGN_NOT_ACTIVE",
   "STORAGE_UNAVAILABLE",
+  /** The request lacks valid dashboard credentials (server-side check). */
+  "UNAUTHENTICATED",
+  /** DASHBOARD_BASIC_AUTH_* missing or invalid where they are required: fail closed. */
+  "DASHBOARD_ACCESS_NOT_CONFIGURED",
   /** Shopify app credentials (client id/secret/store domain) are not set. */
   "SHOPIFY_NOT_CONFIGURED",
   /** Connecting needs PostgreSQL + a valid CREDENTIALS_ENCRYPTION_KEY to store the token. */

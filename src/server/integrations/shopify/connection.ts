@@ -68,7 +68,7 @@ class CredentialsUnreadableError extends Error {
 // --- View models (safe for the UI: no ciphertext, no tokens) ---------------------
 
 export type ShopifyConnectionView =
-  | { state: "not_configured" | "storage_required" | "app_url_insecure"; missing: string[] }
+  | { state: "not_configured" | "auth_required" | "storage_required" | "app_url_insecure"; missing: string[] }
   | { state: "ready"; shopDomain: string; redirectUri: string }
   | {
       state: "connected";
@@ -129,6 +129,7 @@ export function createShopifyConnectionService(deps: ShopifyConnectionDeps) {
   function requireReady(): ShopifyAppConfig {
     const readiness = deps.readiness();
     if (readiness.ready) return readiness.config;
+    if (readiness.reason === "auth_required") throw new DomainError("DASHBOARD_ACCESS_NOT_CONFIGURED");
     throw new DomainError(readiness.reason === "storage_required" ? "SHOPIFY_STORAGE_REQUIRED" : "SHOPIFY_NOT_CONFIGURED", {
       vars: readiness.missing.join(", "),
     });

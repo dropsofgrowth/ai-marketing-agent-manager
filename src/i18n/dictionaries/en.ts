@@ -250,6 +250,7 @@ export const en = {
     description: "Read-only access to your orders and products through your installed Shopify app.",
     notConfigured: "Add these settings on the server to enable connecting: {vars}",
     storageRequired: "Connecting needs encrypted, persistent storage for the access token. Add: {vars}",
+    authRequired: "Live store data is only served behind the dashboard password. Set: {vars}",
     appUrlInsecure: "APP_URL must be an https:// address (or localhost) so Shopify can redirect back.",
     ready: "Ready to connect {store}. Shopify will ask you to approve read-only access, then bring you back here.",
     connect: "Connect Shopify",
@@ -469,7 +470,7 @@ export const en = {
     configured: "Configured",
     notConfigured: "Not configured",
     authNotice:
-      "User sign-in is not implemented yet; everyone acts as the demo owner. Enable Basic Auth before sharing a preview.",
+      "There is no per-user sign-in yet: everyone with the dashboard password acts as the owner. The password is required in production (the dashboard refuses to run without it) and for live Shopify data.",
     workspace: "Workspace",
     workspaceName: "Name",
     currency: "Currency",
@@ -541,6 +542,8 @@ export const en = {
     CREATIVE_NOT_READY: "Only ready creatives can be sent for publishing.",
     CAMPAIGN_NOT_ACTIVE: "Archived campaigns can't be changed.",
     STORAGE_UNAVAILABLE: "The database is unreachable. Try again shortly.",
+    UNAUTHENTICATED: "Sign-in required. Reload the page and enter the dashboard password.",
+    DASHBOARD_ACCESS_NOT_CONFIGURED: "Dashboard access isn't configured on the server (DASHBOARD_BASIC_AUTH_USER / _PASSWORD).",
     SHOPIFY_NOT_CONFIGURED: "Shopify isn't configured on the server yet. See Settings for what's missing.",
     SHOPIFY_STORAGE_REQUIRED:
       "Connecting Shopify needs a database (DATABASE_URL) and an encryption key (CREDENTIALS_ENCRYPTION_KEY).",

@@ -1,7 +1,8 @@
 import "server-only";
 
 import { SHOPIFY_REQUIRED_SCOPES } from "@/integrations/shopify/oauth";
-import type { ServerEnv } from "@/server/env";
+import { DASHBOARD_AUTH_VARS } from "@/lib/basic-auth";
+import { getDashboardAuth, type ServerEnv } from "@/server/env";
 import { isValidEncryptionKey } from "@/server/security/encryption";
 import type { StoreKind } from "@/server/store/types";
 
@@ -24,6 +25,8 @@ export type ShopifyAppConfig = {
 export type ShopifyReadiness =
   | { ready: true; config: ShopifyAppConfig }
   | { ready: false; reason: "not_configured" | "storage_required"; missing: string[] }
+  /** Live store data is never served without the dashboard password — in any environment. */
+  | { ready: false; reason: "auth_required"; missing: string[] }
   | { ready: false; reason: "app_url_insecure"; missing: string[] };
 
 function isLocalhost(url: URL) {
@@ -46,6 +49,10 @@ export function getShopifyReadiness(
     (key) => !env[key],
   );
   if (missingApp.length) return { ready: false, reason: "not_configured", missing: [...missingApp] };
+
+  if (getDashboardAuth(env).mode !== "required") {
+    return { ready: false, reason: "auth_required", missing: [...DASHBOARD_AUTH_VARS] };
+  }
 
   const missingStorage: string[] = [];
   if (requirePersistentStore && (!env.DATABASE_URL || storeKind !== "postgres")) missingStorage.push("DATABASE_URL");

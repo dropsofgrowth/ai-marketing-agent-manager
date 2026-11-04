@@ -2,6 +2,8 @@ import "server-only";
 
 import { z } from "zod";
 
+import { evaluateDashboardAuth, type DashboardAuth } from "@/lib/basic-auth";
+
 /**
  * Server-only, validated environment configuration.
  *
@@ -46,8 +48,10 @@ const envSchema = z.object({
   ),
 
   CREDENTIALS_ENCRYPTION_KEY: optionalString,
-  DASHBOARD_BASIC_AUTH_USER: optionalString,
-  DASHBOARD_BASIC_AUTH_PASSWORD: optionalString,
+  // Validated by evaluateDashboardAuth (required in production; see getDashboardAuth).
+  // Kept lenient here so a bad value fails closed with a clear 503, not a crash.
+  DASHBOARD_BASIC_AUTH_USER: z.preprocess(emptyToUndefined, z.string().optional()),
+  DASHBOARD_BASIC_AUTH_PASSWORD: z.preprocess(emptyToUndefined, z.string().optional()),
 
   LIVE_EXECUTION_ENABLED: booleanFlag(false),
   BUDGET_MAX_INCREASE_PERCENT: positiveNumber(50, 1000),
@@ -115,6 +119,15 @@ export function getEnv(): ServerEnv {
 /** Test helper: forget the cached parse so a test can change process.env. */
 export function resetEnvCacheForTests() {
   cached = undefined;
+}
+
+/** Dashboard access policy from the environment (see src/lib/basic-auth.ts). */
+export function getDashboardAuth(env: ServerEnv = getEnv()): DashboardAuth {
+  return evaluateDashboardAuth({
+    user: env.DASHBOARD_BASIC_AUTH_USER,
+    password: env.DASHBOARD_BASIC_AUTH_PASSWORD,
+    production: env.NODE_ENV === "production",
+  });
 }
 
 export type IntegrationEnvStatus = {
