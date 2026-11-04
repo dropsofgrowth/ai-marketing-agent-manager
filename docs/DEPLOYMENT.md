@@ -3,10 +3,12 @@
 This guide gets the dashboard onto an `https://` link you can open on an iPhone, an
 Android phone and a Windows or Mac computer, and install as an app (PWA).
 
-> **Mock data only.** Every option below runs the app with its built-in mock adapters.
-> Do **not** add real Meta, Shopify or Higgsfield credentials, and keep
-> `LIVE_EXECUTION_ENABLED=false`. No request is ever sent to those platforms; approved
-> changes can only be simulated.
+> **Mock data by default.** Every option below runs the app with its built-in mock
+> adapters. Do **not** add real Meta or Higgsfield credentials, and keep
+> `LIVE_EXECUTION_ENABLED=false`; approved changes can only be simulated.
+> **Shopify (read-only)** can be connected on a deployment with PostgreSQL, a
+> credential encryption key, an https `APP_URL` and Basic Auth — follow
+> **[docs/SHOPIFY.md](SHOPIFY.md)**. Use a separate database for preview deployments.
 
 PWA installation and the service worker need **HTTPS** (or `localhost`). All three
 options give you HTTPS automatically.
@@ -19,10 +21,14 @@ options give you HTTPS automatically.
 
 ---
 
-## Before you start: protect the preview
+## Before you start: set the dashboard password (required)
 
-There is no user sign-in yet, so anyone with the link could use the dashboard. Turn on
-the app's built-in password (HTTP Basic Auth) for every deployment:
+There is no per-user sign-in yet, so the dashboard is protected by one shared password
+(HTTP Basic Auth). **It is mandatory in production:** a production build (`next start`,
+Vercel, Render) **refuses every request with 503** until both variables below are set
+and valid (username without `:`, password of at least 12 characters). This is checked
+twice — in the proxy and again on the server for every page, action and API route — and
+live Shopify data additionally requires it in every environment.
 
 ```bash
 # Pick a username, and generate a long random password:
@@ -31,16 +37,32 @@ openssl rand -base64 24
 
 | Variable | Value |
 | --- | --- |
-| `DASHBOARD_BASIC_AUTH_USER` | e.g. `preview` |
-| `DASHBOARD_BASIC_AUTH_PASSWORD` | the generated password |
+| `DASHBOARD_BASIC_AUTH_USER` | e.g. `preview` (required; no `:`) |
+| `DASHBOARD_BASIC_AUTH_PASSWORD` | the generated password (required; ≥ 12 characters) |
 | `LIVE_EXECUTION_ENABLED` | `false` |
 | `DEFAULT_LOCALE` | `en` or `ar` |
 
-Leave every `META_*`, `SHOPIFY_*` and `HIGGSFIELD_*` variable **empty**.
+Limits of a shared password (until per-user sign-in exists):
 
-Basic Auth protects every page and server action. The web-app manifest, icons,
-`/sw.js`, `/offline.html` and `/api/health` stay public on purpose: browsers fetch
-manifests without credentials, and none of these files contain data.
+- **Use a long random password** (the command above) — the app doesn't throttle wrong
+  guesses, so add rate limiting at the platform if you can (e.g. a Vercel Firewall rule
+  for repeated 401s).
+- **HTTPS only** — Basic Auth sends the password with every request; Vercel, Render and
+  the tunnel below all use HTTPS, and the app sends `Strict-Transport-Security` so
+  browsers refuse plain HTTP to it afterwards.
+- **Never set `DASHBOARD_AUTH_DISABLED`** in a deployment — it is only for `npm run dev`
+  on your own computer, and a deployed server with it set refuses every request (503).
+- **Everyone with the password acts as the owner**, and the audit log can't tell people
+  apart. Share it only with people who may approve changes; rotate it when someone leaves.
+
+Leave every `META_*` and `HIGGSFIELD_*` variable **empty**. Add `SHOPIFY_*` only when
+you are ready to connect the store (see [docs/SHOPIFY.md](SHOPIFY.md)).
+
+The password protects every page, server action and API route (including the Shopify
+OAuth callback). The web-app manifest, icons, `/sw.js`, `/offline.html`, Next.js
+static assets and `/api/health` stay public on purpose: browsers fetch manifests
+without credentials, and none of these files contain data. `npm run test:auth-gate`
+checks this list against a running server.
 
 ---
 

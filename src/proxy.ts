@@ -1,43 +1,30 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { DEFAULT_LOCALE, LOCALE_COOKIE, isLocale, type Locale } from "@/i18n/config";
+import { describeAuthProblems, verifyBasicAuthHeader } from "@/lib/basic-auth";
+import { getDashboardAuth, getEnv } from "@/server/env";
+import { log } from "@/server/logging";
 
 /**
- * Runs before every page request and server action:
- * 1. Optional HTTP Basic Auth (DASHBOARD_BASIC_AUTH_USER/PASSWORD) — a stop-gap
- *    for preview deployments until real sign-in exists. Server actions are POSTs
- *    to page routes, so they are covered too.
- * 2. Redirects paths without a locale prefix to /en or /ar.
+ * Runs before every request except a short allow-list of public files (see `config`):
+ * 1. Dashboard access (HTTP Basic Auth, DASHBOARD_BASIC_AUTH_USER/PASSWORD), FAIL
+ *    CLOSED: missing or invalid credentials refuse every request with 503 however
+ *    the server was started (the only exception is the explicit local opt-in
+ *    DASHBOARD_AUTH_DISABLED=1 under `next dev`); a missing or wrong Authorization
+ *    header gets 401. Server actions
+ *    are POSTs to page routes, and API routes (incl. the Shopify OAuth callback)
+ *    are covered too. This is the first layer only — `getCurrentActor()` checks the
+ *    same credentials again server-side (src/server/auth/dashboard-access.ts).
+ * 2. Redirects page paths without a locale prefix to /en or /ar.
  */
 
-async function digest(value: string): Promise<Uint8Array> {
-  return new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
-}
+const NO_STORE = { "Cache-Control": "no-store" } as const;
 
-/** Constant-time comparison of two SHA-256 digests. */
-async function safeEqual(a: string, b: string): Promise<boolean> {
-  const [da, db] = await Promise.all([digest(a), digest(b)]);
-  let diff = 0;
-  for (let i = 0; i < da.length; i++) diff |= da[i] ^ db[i];
-  return diff === 0;
-}
-
-async function isAuthorized(request: NextRequest, user: string, password: string): Promise<boolean> {
-  const header = request.headers.get("authorization");
-  if (!header?.startsWith("Basic ")) return false;
-  let decoded: string;
-  try {
-    decoded = atob(header.slice(6));
-  } catch {
-    return false;
-  }
-  const separator = decoded.indexOf(":");
-  if (separator < 0) return false;
-  const [userOk, passOk] = await Promise.all([
-    safeEqual(decoded.slice(0, separator), user),
-    safeEqual(decoded.slice(separator + 1), password),
-  ]);
-  return userOk && passOk;
+function notConfigured(detail: string) {
+  return new NextResponse(`${detail}\nSee .env.example and docs/DEPLOYMENT.md.`, {
+    status: 503,
+    headers: { ...NO_STORE, "Content-Type": "text/plain; charset=utf-8" },
+  });
 }
 
 function preferredLocale(request: NextRequest): Locale {
@@ -53,21 +40,29 @@ function preferredLocale(request: NextRequest): Locale {
     .sort((a, b) => b.q - a.q);
   for (const { lang } of accepted) if (isLocale(lang)) return lang;
 
-  const configured = process.env.DEFAULT_LOCALE;
-  return isLocale(configured) ? configured : DEFAULT_LOCALE;
+  return getEnv().DEFAULT_LOCALE ?? DEFAULT_LOCALE;
 }
 
 export async function proxy(request: NextRequest) {
-  const user = process.env.DASHBOARD_BASIC_AUTH_USER;
-  const password = process.env.DASHBOARD_BASIC_AUTH_PASSWORD;
-  if (user && password && !(await isAuthorized(request, user, password))) {
+  let auth: ReturnType<typeof getDashboardAuth>;
+  try {
+    auth = getDashboardAuth();
+  } catch (error) {
+    // Unparseable environment: refuse rather than guess. getEnv's message lists variable names only.
+    log("error", "proxy.env_invalid", { detail: error instanceof Error ? error.message : "unknown" });
+    return notConfigured("Server configuration is invalid.");
+  }
+  if (auth.mode === "misconfigured") return notConfigured(describeAuthProblems(auth.problems));
+  if (auth.mode === "required" && !(await verifyBasicAuthHeader(request.headers.get("authorization"), auth))) {
     return new NextResponse("Authentication required.", {
       status: 401,
-      headers: { "WWW-Authenticate": 'Basic realm="Marketing Agent", charset="UTF-8"' },
+      headers: { ...NO_STORE, "WWW-Authenticate": 'Basic realm="Marketing Agent", charset="UTF-8"' },
     });
   }
 
   const { pathname } = request.nextUrl;
+  // API routes are authenticated above but never localized.
+  if (pathname === "/api" || pathname.startsWith("/api/")) return NextResponse.next();
   const firstSegment = pathname.split("/")[1];
   if (isLocale(firstSegment)) return NextResponse.next();
 
@@ -77,6 +72,20 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except API routes, Next.js internals and files with an extension.
-  matcher: ["/((?!api/|_next/|.*\\..*).*)"],
+  /*
+   * Everything goes through the proxy EXCEPT these public, data-free files: Next.js
+   * static assets, the health probe, and the PWA files browsers fetch without
+   * credentials (the two localized manifests, the manifest's icons by exact name,
+   * service worker, offline page). Keep the exclusions exact: anything else that
+   * skips the proxy reaches the [lang]/[...rest] catch-all and then relies on the
+   * server-side check alone.
+   *
+   * Do not go back to excluding "any path with a dot" or a whole directory: the
+   * catch-all renders the app shell for paths like /en/x.y, so that pattern let
+   * anyone bypass Basic Auth. src/proxy.test.ts and e2e/auth-gate.mjs guard this
+   * list (and that every icon the manifest names stays reachable).
+   */
+  matcher: [
+    "/((?!_next/static/|_next/image|api/health$|icons/(?:icon-192|icon-512|icon-maskable-512)\\.png$|sw\\.js$|offline\\.html$|icon\\.svg$|apple-icon\\.png$|(?:en|ar)/manifest\\.webmanifest$).*)",
+  ],
 };

@@ -2,6 +2,8 @@ import "server-only";
 
 import { z } from "zod";
 
+import { evaluateDashboardAuth, type DashboardAuth } from "@/lib/basic-auth";
+
 /**
  * Server-only, validated environment configuration.
  *
@@ -46,8 +48,12 @@ const envSchema = z.object({
   ),
 
   CREDENTIALS_ENCRYPTION_KEY: optionalString,
-  DASHBOARD_BASIC_AUTH_USER: optionalString,
-  DASHBOARD_BASIC_AUTH_PASSWORD: optionalString,
+  // Validated by evaluateDashboardAuth (required in every mode; see getDashboardAuth).
+  // Kept lenient here so a bad value fails closed with a clear 503, not a crash.
+  DASHBOARD_BASIC_AUTH_USER: z.preprocess(emptyToUndefined, z.string().optional()),
+  DASHBOARD_BASIC_AUTH_PASSWORD: z.preprocess(emptyToUndefined, z.string().optional()),
+  /** Local-development opt-in to run without a password: only "1", only with `next dev`. */
+  DASHBOARD_AUTH_DISABLED: z.preprocess(emptyToUndefined, z.string().optional()),
 
   LIVE_EXECUTION_ENABLED: booleanFlag(false),
   BUDGET_MAX_INCREASE_PERCENT: positiveNumber(50, 1000),
@@ -68,15 +74,26 @@ const envSchema = z.object({
   ),
   META_API_VERSION: optionalString,
 
+  /** Dev Dashboard app "Client ID" (public identifier, but still kept server-side). */
+  SHOPIFY_CLIENT_ID: optionalString,
+  /** Dev Dashboard app "Secret". Signs OAuth callbacks and redeems/refreshes tokens. Never sent to the browser. */
+  SHOPIFY_CLIENT_SECRET: optionalString,
+  /** The one store this deployment may connect to, e.g. drops-of-growth.myshopify.com. */
   SHOPIFY_STORE_DOMAIN: z.preprocess(
+    (value) => (typeof emptyToUndefined(value) === "string" ? String(value).trim().toLowerCase() : undefined),
+    z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/, "SHOPIFY_STORE_DOMAIN must be <store>.myshopify.com")
+      .optional(),
+  ),
+  /** Pinned Admin API version (YYYY-01|04|07|10). Bump deliberately after testing. */
+  SHOPIFY_API_VERSION: z.preprocess(
     emptyToUndefined,
     z
       .string()
-      .regex(/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i, "SHOPIFY_STORE_DOMAIN must be <store>.myshopify.com")
-      .optional(),
+      .regex(/^\d{4}-(01|04|07|10)$/, "SHOPIFY_API_VERSION must look like 2026-10")
+      .default("2026-10"),
   ),
-  SHOPIFY_ADMIN_ACCESS_TOKEN: optionalString,
-  SHOPIFY_API_VERSION: optionalString,
 
   HIGGSFIELD_API_KEY: optionalString,
   HIGGSFIELD_API_SECRET: optionalString,
@@ -106,6 +123,16 @@ export function resetEnvCacheForTests() {
   cached = undefined;
 }
 
+/** Dashboard access policy from the environment (see src/lib/basic-auth.ts). */
+export function getDashboardAuth(env: ServerEnv = getEnv()): DashboardAuth {
+  return evaluateDashboardAuth({
+    user: env.DASHBOARD_BASIC_AUTH_USER,
+    password: env.DASHBOARD_BASIC_AUTH_PASSWORD,
+    disableFlag: env.DASHBOARD_AUTH_DISABLED,
+    development: env.NODE_ENV === "development",
+  });
+}
+
 export type IntegrationEnvStatus = {
   metaAds: { credentialsPresent: boolean; missing: string[] };
   shopify: { credentialsPresent: boolean; missing: string[] };
@@ -120,7 +147,7 @@ export function getIntegrationEnvStatus(env: ServerEnv = getEnv()): IntegrationE
   };
   return {
     metaAds: check(["META_APP_ID", "META_APP_SECRET", "META_ACCESS_TOKEN", "META_AD_ACCOUNT_ID"]),
-    shopify: check(["SHOPIFY_STORE_DOMAIN", "SHOPIFY_ADMIN_ACCESS_TOKEN"]),
-    higgsfield: check(["HIGGSFIELD_API_KEY", "HIGGSFIELD_API_BASE_URL"]),
+    shopify: check(["SHOPIFY_CLIENT_ID", "SHOPIFY_CLIENT_SECRET", "SHOPIFY_STORE_DOMAIN"]),
+    higgsfield: check(["HIGGSFIELD_API_KEY", "HIGGSFIELD_API_SECRET", "HIGGSFIELD_API_BASE_URL"]),
   };
 }

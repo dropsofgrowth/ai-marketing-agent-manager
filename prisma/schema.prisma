@@ -163,6 +163,10 @@ model Membership {
 }
 
 /// One connected external account (Meta ad account, Shopify store, Higgsfield workspace).
+///
+/// Safety constraints in SQL (see migrations): ciphertext format only, CONNECTED
+/// rows must carry credentials, REVOKED rows must not, and at most one current
+/// (CONNECTED/ERROR) connection per provider and workspace.
 model IntegrationConnection {
   id                    String              @id @default(cuid())
   workspaceId           String              @map("workspace_id")
@@ -171,12 +175,25 @@ model IntegrationConnection {
   /// e.g. "act_1234567890" for Meta, "my-store.myshopify.com" for Shopify.
   externalAccountId     String?             @map("external_account_id")
   displayName           String?             @map("display_name")
+  /// Access scopes actually granted by the provider (not the ones requested).
   scopes                String[]            @default([])
   /// AES-256-GCM ciphertext (base64url, versioned). Never plaintext.
   encryptedCredentials  String?             @map("encrypted_credentials")
   credentialsKeyVersion Int?                @map("credentials_key_version")
+  /// Expiry of the current access token (null = provider issued a non-expiring token).
+  accessTokenExpiresAt  DateTime?           @map("access_token_expires_at")
+  /// After this the connection cannot be refreshed and must be re-authorized.
+  refreshTokenExpiresAt DateTime?           @map("refresh_token_expires_at")
+  connectedAt           DateTime?           @map("connected_at")
+  /// Last successful authenticated call (connect, verify or data read).
   lastSyncedAt          DateTime?           @map("last_synced_at")
+  /// Short error code only (e.g. SHOPIFY_RECONNECT_REQUIRED) — never a raw provider message.
   lastError             String?             @map("last_error")
+  /// Token-refresh lease: the server instance currently refreshing (rotating) the token.
+  /// Claimed and released with single conditional UPDATEs — no transaction is held
+  /// while Shopify is called.
+  refreshLeaseId        String?             @map("refresh_lease_id")
+  refreshLeaseUntil     DateTime?           @map("refresh_lease_until")
   createdAt             DateTime            @default(now()) @map("created_at")
   updatedAt             DateTime            @updatedAt @map("updated_at")
 

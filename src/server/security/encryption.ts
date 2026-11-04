@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
 
 /**
  * AES-256-GCM envelope for third-party credentials stored at rest
@@ -10,6 +10,8 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
  */
 const VERSION = "v1";
 const IV_BYTES = 12;
+/** Full 128-bit GCM tag, pinned on decryption so a truncated tag is never accepted. */
+const TAG_BYTES = 16;
 
 function parseKey(base64Key: string): Buffer {
   const key = Buffer.from(base64Key, "base64");
@@ -19,9 +21,25 @@ function parseKey(base64Key: string): Buffer {
   return key;
 }
 
+/** True when the value decodes to exactly 32 bytes (usable as an AES-256 key). */
+export function isValidEncryptionKey(base64Key: string | undefined): boolean {
+  if (!base64Key) return false;
+  try {
+    return Buffer.from(base64Key, "base64").length === 32;
+  } catch {
+    return false;
+  }
+}
+
+/** Derives a purpose-specific HMAC key so the encryption key itself never signs anything. */
+export function signWithKey(base64Key: string, purpose: string, message: string): string {
+  const derived = createHmac("sha256", parseKey(base64Key)).update(`purpose:${purpose}`).digest();
+  return createHmac("sha256", derived).update(message).digest("base64url");
+}
+
 export function encryptSecret(plaintext: string, base64Key: string, context: string): string {
   const iv = randomBytes(IV_BYTES);
-  const cipher = createCipheriv("aes-256-gcm", parseKey(base64Key), iv);
+  const cipher = createCipheriv("aes-256-gcm", parseKey(base64Key), iv, { authTagLength: TAG_BYTES });
   cipher.setAAD(Buffer.from(context, "utf8"));
   const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -34,7 +52,10 @@ export function decryptSecret(token: string, base64Key: string, context: string)
     throw new Error("Unsupported encrypted secret format.");
   }
   const [, iv, tag, ciphertext] = parts.map((p) => Buffer.from(p, "base64url"));
-  const decipher = createDecipheriv("aes-256-gcm", parseKey(base64Key), iv);
+  if (iv.length !== IV_BYTES || tag.length !== TAG_BYTES) {
+    throw new Error("Unsupported encrypted secret format.");
+  }
+  const decipher = createDecipheriv("aes-256-gcm", parseKey(base64Key), iv, { authTagLength: TAG_BYTES });
   decipher.setAAD(Buffer.from(context, "utf8"));
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");

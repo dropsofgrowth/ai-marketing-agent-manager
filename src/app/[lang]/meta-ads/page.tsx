@@ -6,6 +6,7 @@ import { Suspense } from "react";
 import { BudgetChangeDialog } from "@/components/approvals/budget-change-dialog";
 import { TimeSeriesChart } from "@/components/charts/time-series-chart";
 import { Badge } from "@/components/ui/badge";
+import { DataSources } from "@/components/integrations/data-sources";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { DataList, DataListItem, MetricGrid } from "@/components/ui/data-list";
 import { Notice } from "@/components/ui/notice";
@@ -16,7 +17,7 @@ import { TableContainer, Td, Th } from "@/components/ui/table";
 import { richT } from "@/i18n/rich";
 import { getI18n, type ServerI18n } from "@/i18n/server";
 import { getApprovalConfig } from "@/server/services";
-import { loadCampaignRows, loadPerformance } from "@/server/queries/performance";
+import { loadAdPerformance, loadCampaignRows } from "@/server/queries/performance";
 
 type CampaignRow = Awaited<ReturnType<typeof loadCampaignRows>>[number];
 type Guardrails = ReturnType<typeof getApprovalConfig>["guardrails"];
@@ -63,7 +64,7 @@ async function MetaAdsContent({ i18n }: { i18n: ServerI18n }) {
   await connection();
   const now = new Date();
   const { dict, fmt, t } = i18n;
-  const perf = await loadPerformance(DAYS, now);
+  const perf = await loadAdPerformance(DAYS, now);
   const rows = await loadCampaignRows(perf.range);
   const { guardrails } = getApprovalConfig();
   const currency = perf.account.currency;
@@ -73,6 +74,7 @@ async function MetaAdsContent({ i18n }: { i18n: ServerI18n }) {
 
   return (
     <div className="space-y-5 sm:space-y-6">
+      <DataSources ads={perf.adsMode} i18n={i18n} />
       <p className="text-sm text-ink-2">{richT(dict.metaAds.subtitle, { account: perf.account.name })}</p>
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">

@@ -26,6 +26,7 @@ export const MOCK_SHOP = {
   domain: "demo-store.myshopify.com",
   name: "Demo Store (mock)",
   currency: MOCK_CURRENCY,
+  timezone: "UTC",
 } as const;
 
 type CampaignProfile = MetaCampaign & {

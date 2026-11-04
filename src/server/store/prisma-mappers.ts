@@ -17,12 +17,14 @@ import {
   type AuditLogEntry,
   type Automation,
   type Creative,
+  type IntegrationConnection,
 } from "@/domain/types";
 import type {
   ApprovalRequest as ApprovalRow,
   AuditLog as AuditRow,
   Automation as AutomationRow,
   Creative as CreativeRow,
+  IntegrationConnection as ConnectionRow,
 } from "@/generated/prisma/client";
 
 const flatRecordSchema = z
@@ -117,5 +119,28 @@ export function toAuditEntry(row: AuditRow): AuditLogEntry {
     entityId: row.entityId,
     metadata: flatRecordSchema.parse(row.metadata ?? null),
     createdAt: row.createdAt,
+  };
+}
+
+export function toConnection(row: ConnectionRow): IntegrationConnection {
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    provider: row.provider,
+    status: row.status,
+    externalAccountId: row.externalAccountId,
+    displayName: row.displayName,
+    scopes: [...(row.scopes ?? [])],
+    encryptedCredentials: row.encryptedCredentials,
+    credentialsKeyVersion: row.credentialsKeyVersion,
+    accessTokenExpiresAt: row.accessTokenExpiresAt,
+    refreshTokenExpiresAt: row.refreshTokenExpiresAt,
+    connectedAt: row.connectedAt,
+    lastSyncedAt: row.lastSyncedAt,
+    lastError: row.lastError,
+    refreshLeaseId: row.refreshLeaseId,
+    refreshLeaseUntil: row.refreshLeaseUntil,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }

@@ -5,6 +5,8 @@ import { Suspense, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import type { ServerI18n } from "@/i18n/server";
 import { getEnv } from "@/server/env";
+import { getShopifyConnectionView } from "@/server/integrations/shopify";
+import { log } from "@/server/logging";
 import { getPendingCount } from "@/server/queries/shell";
 
 import { Brand } from "./brand";
@@ -51,18 +53,40 @@ async function MobileTabBarWithCount() {
   return <MobileTabBar pendingCount={await getPendingCount()} />;
 }
 
-/** Request-time notices (depend on runtime env, not on the build). */
+/** True when a Shopify store is connected (live, read-only). Never throws. */
+async function isShopifyLive(): Promise<boolean> {
+  try {
+    return (await getShopifyConnectionView()).state === "connected";
+  } catch (error) {
+    log("warn", "shell.shopify_status_unavailable", { detail: error instanceof Error ? error.name : "unknown" });
+    return false;
+  }
+}
+
+/** Header badge: which kind of data the dashboard is showing. */
+async function DataModeBadge({ i18n }: { i18n: ServerI18n }) {
+  await connection();
+  const live = await isShopifyLive();
+  return (
+    <Badge tone={live ? "accent" : "warning"} icon={<FlaskConical aria-hidden className="size-3" />}>
+      {live ? i18n.dict.shell.mixedMode : i18n.dict.shell.mockMode}
+    </Badge>
+  );
+}
+
+/** Request-time notices (depend on runtime env and connections, not on the build). */
 async function RuntimeNotices({ i18n }: { i18n: ServerI18n }) {
   await connection();
   const { dict } = i18n;
   const usingMemory = !getEnv().DATABASE_URL;
+  const live = await isShopifyLive();
   return (
     <div className="px-page border-b border-line bg-accent-soft/60 py-2 text-xs text-ink sm:text-[13px]">
       <p className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-x-4 gap-y-1">
         <span className="inline-flex items-start gap-1.5">
           <FlaskConical aria-hidden className="mt-0.5 size-3.5 shrink-0 text-accent-ink" />
-          <span className="sm:hidden">{dict.shell.mockBannerShort}</span>
-          <span className="hidden sm:inline">{dict.shell.mockBanner}</span>
+          <span className="sm:hidden">{live ? dict.shell.liveBannerShort : dict.shell.mockBannerShort}</span>
+          <span className="hidden sm:inline">{live ? dict.shell.liveBanner : dict.shell.mockBanner}</span>
         </span>
         {usingMemory ? (
           <span className="inline-flex items-start gap-1.5 text-ink-2">
@@ -105,9 +129,9 @@ export function AppShell({ i18n, children }: { i18n: ServerI18n; children: React
             </div>
             <div className="ms-auto flex shrink-0 items-center gap-2">
               <span className="hidden sm:block">
-                <Badge tone="warning" icon={<FlaskConical aria-hidden className="size-3" />}>
-                  {dict.shell.mockMode}
-                </Badge>
+                <Suspense fallback={null}>
+                  <DataModeBadge i18n={i18n} />
+                </Suspense>
               </span>
               <LocaleSwitcher />
             </div>

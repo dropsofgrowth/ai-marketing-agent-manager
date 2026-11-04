@@ -4,15 +4,20 @@ import { connection } from "next/server";
 import { Suspense, type ReactNode } from "react";
 
 import { IntegrationList } from "@/components/integrations/integration-list";
+import { ShopifyConnectionCard } from "@/components/integrations/shopify-connection-card";
 import { AppSettings } from "@/components/settings/app-settings";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Notice } from "@/components/ui/notice";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionSkeleton } from "@/components/ui/skeleton";
+import { hasPermission } from "@/domain/permissions";
+import { isShopifyConnectResult } from "@/domain/shopify-connect";
 import { LOCALE_NAMES } from "@/i18n/config";
 import { getI18n, type ServerI18n } from "@/i18n/server";
-import { getEnv } from "@/server/env";
+import { getCurrentActor } from "@/server/auth/actor";
+import { getDashboardAuth, getEnv } from "@/server/env";
+import { getShopifyConnectionView } from "@/server/integrations/shopify";
 import { getIntegrationStatuses } from "@/server/queries/integrations";
 import { getApprovalConfig } from "@/server/services";
 import { DEMO_WORKSPACE } from "@/server/store/demo-data";
@@ -22,13 +27,13 @@ export async function generateMetadata({ params }: PageProps<"/[lang]/settings">
   return { title: getI18n((await params).lang).dict.settings.title };
 }
 
-export default async function SettingsPage({ params }: PageProps<"/[lang]/settings">) {
+export default async function SettingsPage({ params, searchParams }: PageProps<"/[lang]/settings">) {
   const i18n = getI18n((await params).lang);
   return (
     <>
       <PageHeader title={i18n.dict.settings.title} description={i18n.dict.settings.subtitle} />
       <Suspense fallback={<SectionSkeleton label={i18n.dict.common.loading} tiles={0} />}>
-        <SettingsContent i18n={i18n} />
+        <SettingsContent i18n={i18n} searchParams={searchParams} />
       </Suspense>
     </>
   );
@@ -56,13 +61,27 @@ function YesNo({ ok, yes, no }: { ok: boolean; yes: string; no: string }) {
   );
 }
 
-async function SettingsContent({ i18n }: { i18n: ServerI18n }) {
+async function SettingsContent({
+  i18n,
+  searchParams,
+}: {
+  i18n: ServerI18n;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   await connection();
   const { dict, fmt, t } = i18n;
   const s = dict.settings;
   const env = getEnv();
   const config = getApprovalConfig();
   const store = getStore();
+  const rawResult = (await searchParams).shopify;
+  // Only known result codes are rendered; anything else in the URL is ignored.
+  const shopifyResult = isShopifyConnectResult(rawResult) ? rawResult : null;
+  const [actor, shopifyView, statuses] = await Promise.all([
+    getCurrentActor(),
+    getShopifyConnectionView(),
+    getIntegrationStatuses(),
+  ]);
   let storageOk = true;
   try {
     await store.ping();
@@ -79,10 +98,17 @@ async function SettingsContent({ i18n }: { i18n: ServerI18n }) {
         </CardBody>
       </Card>
 
+      <ShopifyConnectionCard
+        view={shopifyView}
+        result={shopifyResult}
+        canManage={hasPermission(actor.role, "integration.manage")}
+        i18n={i18n}
+      />
+
       <Card className="xl:col-span-2">
         <CardHeader title={s.integrations} description={s.integrationsHint} />
         <CardBody>
-          <IntegrationList statuses={getIntegrationStatuses()} i18n={i18n} showMissing />
+          <IntegrationList statuses={statuses} i18n={i18n} showMissing />
         </CardBody>
       </Card>
 
@@ -136,7 +162,7 @@ async function SettingsContent({ i18n }: { i18n: ServerI18n }) {
           <CardBody className="space-y-4">
             <dl className="divide-y divide-line">
               <Row label={s.basicAuth}>
-                <YesNo ok={Boolean(env.DASHBOARD_BASIC_AUTH_USER && env.DASHBOARD_BASIC_AUTH_PASSWORD)} yes={s.configured} no={s.notConfigured} />
+                <YesNo ok={getDashboardAuth(env).mode === "required"} yes={s.configured} no={s.notConfigured} />
               </Row>
               <Row label={s.encryptionKey}>
                 <YesNo ok={Boolean(env.CREDENTIALS_ENCRYPTION_KEY)} yes={s.configured} no={s.notConfigured} />

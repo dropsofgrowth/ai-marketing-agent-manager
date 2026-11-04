@@ -23,6 +23,24 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   adapters refuse anything else, and a DB check constraint only allows `execution_mode = SIMULATED`.
   Do not change these until live adapters exist, are reviewed, and credentials/permissions are configured.
 - **Never claim a live integration works** unless it has been exercised against the real API.
+- **Shopify is read-only.** Only GraphQL `query` documents may be sent (`assertReadOnlyDocument` in
+  `src/integrations/shopify/graphql-client.ts`); a token with any `write_*` scope is refused and never
+  stored. Adding mutations or write scopes needs an explicit, reviewed decision.
+- **Third-party tokens are stored only encrypted** (`integration_connections`, AES-256-GCM, a DB CHECK
+  rejects non-ciphertext, GCM tag/IV lengths are pinned). Refresh tokens rotate: refresh under the
+  connection's refresh lease (`acquireRefreshLease`/`completeRefreshLease`), never inside a transaction
+  that spans a network call, and re-check scopes on every refresh. Log integration events
+  only through `src/server/logging.ts` (codes and ids, never tokens, secrets, codes or response bodies).
+- **Once a store is connected, failures show an error state — never demo data.** Demo data is only for
+  the not-connected state and is always labelled (`<DataSources>`). Never combine live store revenue with
+  demo ad spend (see `comparable` in `src/server/queries/performance.ts`).
+- **Dashboard access fails closed.** `DASHBOARD_BASIC_AUTH_USER/_PASSWORD` are mandatory whatever
+  `NODE_ENV` is (validated in `src/lib/basic-auth.ts`; missing/invalid → 503 everywhere). The one
+  exception is the explicit local opt-in `DASHBOARD_AUTH_DISABLED=1` under `next dev`; the flag anywhere
+  else fails closed. Live store data requires the credentials in every environment. They are checked in `src/proxy.ts` AND server-side in `getCurrentActor()` —
+  never read workspace or store data without going through `getCurrentActor()` (or
+  `requireDashboardAccess()`), and never add another bypass/opt-out. Keep the proxy matcher's public
+  exclusions exact (named files only). `npm run test:auth-gate` guards this.
 - **Secrets stay server-side.** Read env only via `src/server/env.ts`; never prefix secrets with
   `NEXT_PUBLIC_`; never log or render credential values (presence only).
 - **Server Actions are public endpoints.** Validate input with zod and enforce permissions in the

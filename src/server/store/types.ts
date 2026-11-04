@@ -4,8 +4,11 @@ import type {
   ApprovalType,
   AuditLogEntry,
   Automation,
+  ConnectionStatus,
   Creative,
   CreativeStatus,
+  IntegrationConnection,
+  IntegrationProviderId,
 } from "@/domain/types";
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -82,6 +85,87 @@ export interface AuditRepository {
   list(workspaceId: string, options?: { limit?: number }): Promise<AuditLogEntry[]>;
 }
 
+/** Statuses that make a connection the workspace's current one for its provider. */
+export const CURRENT_CONNECTION_STATUSES: readonly ConnectionStatus[] = ["CONNECTED", "ERROR"];
+
+export type SaveConnectionInput = {
+  workspaceId: string;
+  provider: IntegrationProviderId;
+  externalAccountId: string;
+  displayName: string | null;
+  scopes: string[];
+  /** Ciphertext from encryptSecret(); the store rejects anything else. */
+  encryptedCredentials: string;
+  credentialsKeyVersion: number;
+  accessTokenExpiresAt: Date | null;
+  refreshTokenExpiresAt: Date | null;
+  connectedAt: Date;
+  lastSyncedAt: Date;
+};
+
+export type ConnectionPatch = Partial<
+  Pick<
+    IntegrationConnection,
+    | "status"
+    | "displayName"
+    | "scopes"
+    | "encryptedCredentials"
+    | "credentialsKeyVersion"
+    | "accessTokenExpiresAt"
+    | "refreshTokenExpiresAt"
+    | "lastSyncedAt"
+    | "lastError"
+  >
+>;
+
+export interface ConnectionRepository {
+  /** The current (CONNECTED or ERROR) connection for a provider, if any. */
+  getCurrent(workspaceId: string, provider: IntegrationProviderId): Promise<IntegrationConnection | null>;
+  get(workspaceId: string, id: string): Promise<IntegrationConnection | null>;
+  /**
+   * Atomically stores a freshly authorized connection as CONNECTED. Any other
+   * current connection for the same provider is revoked and its credentials wiped.
+   */
+  saveConnected(input: SaveConnectionInput): Promise<IntegrationConnection>;
+  update(workspaceId: string, id: string, patch: ConnectionPatch): Promise<IntegrationConnection | null>;
+  /**
+   * Applies `patch` only while the row still has `status` (one conditional UPDATE).
+   * Returns the updated row, or null when another request changed it first — so
+   * exactly one caller wins a state change (and records its audit entry).
+   */
+  updateIfStatus(
+    workspaceId: string,
+    id: string,
+    status: ConnectionStatus,
+    patch: ConnectionPatch,
+  ): Promise<IntegrationConnection | null>;
+  /**
+   * Claims the token-refresh lease for `leaseId` until `until`, if the connection is
+   * CONNECTED and no unexpired lease exists. One conditional UPDATE: atomic across
+   * server instances, and nothing stays locked while the caller talks to Shopify.
+   */
+  acquireRefreshLease(workspaceId: string, id: string, leaseId: string, now: Date, until: Date): Promise<boolean>;
+  /**
+   * Applies `patch` and releases the lease — only if `leaseId` still holds it AND the
+   * connection is still CONNECTED (compare-and-swap). Returns the updated row, or null
+   * if the lease was lost or the connection was disconnected/flagged meanwhile — so a
+   * refresh that finishes late can never write credentials onto a REVOKED/ERROR row.
+   */
+  completeRefreshLease(
+    workspaceId: string,
+    id: string,
+    leaseId: string,
+    patch: ConnectionPatch,
+  ): Promise<IntegrationConnection | null>;
+}
+
+/** Defense in depth (mirrors the DB CHECK): only versioned ciphertext may be stored. */
+export function assertCiphertext(value: string | null | undefined): void {
+  if (value !== null && value !== undefined && !/^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value)) {
+    throw new Error("Refusing to store credentials that are not encrypted.");
+  }
+}
+
 export type StoreKind = "postgres" | "memory";
 
 export interface DataStore {
@@ -90,6 +174,7 @@ export interface DataStore {
   readonly creatives: CreativeRepository;
   readonly automations: AutomationRepository;
   readonly audit: AuditRepository;
+  readonly connections: ConnectionRepository;
   /** Runs `fn` atomically (a database transaction for Postgres). */
   transaction<T>(fn: (tx: DataStore) => Promise<T>): Promise<T>;
   /** Throws when the backing store is unreachable. */

@@ -4,11 +4,12 @@ A dashboard for running Meta Ads, a Shopify store and AI-generated creatives (Hi
 from one place — in **English and Arabic (RTL)** — where **every budget change and every creative
 publish must be approved by a person** before anything runs.
 
-> **Status: Phase 2 — responsive, installable dashboard.** Works on iPhone, Android, tablets,
-> Windows and Mac, in English and Arabic, and installs as an app (PWA). All three integrations
-> still run on **deterministic mock data**: no request is sent to Meta, Shopify or Higgsfield,
-> no live integration is complete, and approved changes can only be executed as **simulations**.
-> Live adapters require real credentials, API permissions and review
+> **Status: Phase 2 — responsive, installable dashboard + read-only Shopify.** Works on iPhone,
+> Android, tablets, Windows and Mac, in English and Arabic, and installs as an app (PWA).
+> **Shopify** can be connected **read-only** (OAuth authorization code grant, encrypted tokens) —
+> see **[docs/SHOPIFY.md](docs/SHOPIFY.md)**; it is tested against a simulated Shopify but not yet
+> against the real API. **Meta Ads and Higgsfield** still run on deterministic mock data, and
+> approved changes can only be executed as **simulations**
 > (see [Roadmap](#roadmap-to-live-integrations)).
 
 ## What's included
@@ -23,7 +24,7 @@ publish must be approved by a person** before anything runs.
 | **Approval workflow** | Budget changes and creative publishing: request → approve/reject → explicit simulated run. Guardrails, risk levels, expiry, optimistic locking, audit log. |
 | **Automations** | "Scale winners" / "Trim losers" rules that **only propose** changes as pending approvals. |
 | **Data** | PostgreSQL + Prisma 7 schema and migration (with safety CHECK constraints), seed data. Falls back to an in-memory demo store when `DATABASE_URL` is unset. |
-| **Security** | Validated server-only env, AES-256-GCM helper for credentials at rest, optional HTTP Basic Auth, security headers, zod-validated server actions with role checks. |
+| **Security** | Validated server-only env, AES-256-GCM helper for credentials at rest, mandatory dashboard password in production (fail closed, checked in the proxy and again server-side), security headers, zod-validated server actions with role checks. |
 | **Quality** | ESLint, strict TypeScript, 49 unit tests (Vitest), a responsive/PWA smoke test across 9 device profiles × 2 languages (Playwright). |
 
 ## Tech stack
@@ -41,6 +42,7 @@ Requires **Node.js ≥ 20.19** (22 LTS recommended) and npm.
 git clone <this repo> && cd ai-marketing-agent
 npm install                # also runs `prisma generate`
 cp .env.example .env       # all values may stay empty for a demo
+echo "DASHBOARD_AUTH_DISABLED=1" > .env.development.local   # local `next dev` only: no password
 npm run dev
 ```
 
@@ -88,8 +90,12 @@ npm start                  # http://localhost:3000
 
 For a shared preview deployment:
 
-- Set `DASHBOARD_BASIC_AUTH_USER` and `DASHBOARD_BASIC_AUTH_PASSWORD` — every page and server
-  action then requires them (there is **no user sign-in yet**; everyone acts as the demo owner).
+- Set `DASHBOARD_BASIC_AUTH_USER` and `DASHBOARD_BASIC_AUTH_PASSWORD` (password ≥ 12 characters) —
+  **required**: a production build answers every request with 503 until they are set and valid.
+  Every page, server action and API route then requires them (there is **no per-user sign-in yet**;
+  everyone with the password acts as the demo owner). This holds however the server is started
+  (a build run with `NODE_ENV=test` is refused too); the only way to run without them is
+  `DASHBOARD_AUTH_DISABLED=1` with `npm run dev`, kept in `.env.development.local`.
 - Use `npm run db:deploy` (not `db:migrate`) to apply migrations in non-development environments.
 - `/api/health` stays public for load-balancer checks and reveals no configuration.
 
@@ -104,11 +110,24 @@ For a shared preview deployment:
 | `npm test` | Unit tests (Vitest). `npm run test:watch` for watch mode. |
 | `npm run check` | lint + typecheck + tests. |
 | `npm run test:responsive` | Responsive + PWA smoke test against a running server (`BASE_URL`, optional `BASIC_AUTH=user:pass`, `SCREENSHOTS=dir`). First run: `npx playwright install chromium`. |
+| `npm run test:shopify-flow` | End-to-end Shopify connect flow against a simulated Shopify (see [docs/SHOPIFY.md](docs/SHOPIFY.md#8-tests)). Optional `BASIC_AUTH=user:pass`. |
+| `npm run test:auth-gate` | Against a production server: with `DASHBOARD_BASIC_AUTH_*` set (`BASIC_AUTH=user:pass`), every page, dotted path, server action and API route needs the password, spoofed internal headers don't bypass it, and PWA files stay public; with them missing/invalid (`EXPECT=fail-closed`), everything is refused with 503. |
 | `npm run pwa:assets` | Regenerate PWA icons and `public/offline.html` (after changing the logo or the `offline` strings). |
 | `npm run db:migrate` | Create/apply migrations in development. |
 | `npm run db:deploy` | Apply committed migrations (CI/production). |
 | `npm run db:seed` | Seed demo workspace (skips if it already has data). |
 | `npm run db:generate` | Regenerate the Prisma client. |
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`, with a read-only token
+and no repository secrets:
+
+- **check** — `npm run check` (lint, typecheck, unit tests) and `npm run build`;
+- **integration** — PostgreSQL 16 service: migrations, schema-drift check, seed, repository tests; then the
+  Shopify connect flow against a *simulated* Shopify with Basic Auth on (fails if a token/secret/code reaches
+  the server log or a GraphQL mutation is sent), the access-gate check, a fail-closed check (production with
+  missing and with invalid credentials), and the responsive + PWA smoke test behind the password.
 
 ## Environment variables
 
@@ -118,14 +137,17 @@ See [`.env.example`](.env.example) for the full, commented template. Never commi
 | --- | --- | --- |
 | `DATABASE_URL` | No | PostgreSQL URL. Empty → in-memory demo store. |
 | `CREDENTIALS_ENCRYPTION_KEY` | For storing credentials | 32-byte base64 key (`openssl rand -base64 32`). |
-| `DASHBOARD_BASIC_AUTH_USER` / `_PASSWORD` | Recommended for previews | Enables HTTP Basic Auth on all pages and actions. |
+| `DASHBOARD_BASIC_AUTH_USER` / `_PASSWORD` | **Yes** | Dashboard password (HTTP Basic Auth), password ≥ 12 characters. Missing/invalid → every request gets 503 (fail closed), whatever `NODE_ENV` is. Also required for live Shopify data. |
+| `DASHBOARD_AUTH_DISABLED` | No (local only) | `1` lets `npm run dev` run without the password (put it in `.env.development.local`). Set anywhere else — or to another value — it makes every request fail with 503. |
 | `DEFAULT_LOCALE` | No | `en` (default) or `ar`. |
 | `LIVE_EXECUTION_ENABLED` | No | Keep `false`. No live adapters exist; if `true`, runs are still simulated and flagged. |
 | `BUDGET_MAX_INCREASE_PERCENT` / `_DECREASE_PERCENT` | No | Per-request limits (defaults 50 / 80). |
 | `BUDGET_MAX_DAILY_AMOUNT` | No | Daily budget ceiling in major units (default 5000). |
 | `APPROVAL_TTL_HOURS` | No | Pending requests expire after this (default 72). |
 | `REQUIRE_SEPARATE_APPROVER` | No | Four-eyes rule. Recommended `true` once real users exist. |
-| `META_*`, `SHOPIFY_*`, `HIGGSFIELD_*` | No | Placeholders for Phase 2. Settings shows whether they're present (never their values); they do **not** switch on live data. |
+| `SHOPIFY_CLIENT_ID` / `_SECRET` / `_STORE_DOMAIN` | For Shopify | Dev Dashboard app credentials + the one store to connect. Read-only. See [docs/SHOPIFY.md](docs/SHOPIFY.md). |
+| `SHOPIFY_API_VERSION` | No | Pinned Admin API version (default `2026-10`). |
+| `META_*`, `HIGGSFIELD_*` | No | Placeholders. Settings shows whether they're present (never their values); they do **not** switch on live data. |
 
 ## How the approval workflow keeps you safe
 
@@ -169,7 +191,7 @@ src/
     page.tsx               Overview
     meta-ads/ shopify/ creatives/ analytics/ automations/ approvals/ settings/
   app/api/health/          Health probe
-  proxy.ts                 Locale redirect + optional Basic Auth (Next 16 "proxy")
+  proxy.ts                 Locale redirect + mandatory dashboard password (Next 16 "proxy")
   components/              UI (ui/, layout/, charts/, approvals/, creatives/, automations/, settings/)
   lib/pwa/                 Manifest builder + client-side install/service-worker helpers
   domain/                  Framework-free business rules: types, state machine, guardrails,
@@ -212,7 +234,7 @@ src/
   It is registered only in production builds on HTTPS/localhost.
 - **Install UI:** Settings → *App & display* shows an Install button (Chrome/Edge/Android), Share → Add to
   Home Screen steps on iPhone/iPad, or an "already installed" state.
-- Manifest, icons, `sw.js` and `offline.html` are outside the Basic Auth matcher (they contain no data).
+- Manifest, icons, `sw.js` and `offline.html` are outside the password gate (they contain no data).
 
 ## Internationalization
 
@@ -231,10 +253,13 @@ Nothing below is done yet. Each step needs real credentials, the right API permi
    enable `REQUIRE_SEPARATE_APPROVER`.
 2. **Meta Ads (read)** — a `LiveMetaAdsService` implementing `MetaAdsService` via the Marketing API
    (`ads_read`), with rate-limit handling and caching; select it in `integrations/registry.ts`.
-3. **Shopify (read)** — Admin GraphQL API adapter with read scopes; webhooks for orders.
+3. **Shopify (read)** — *implemented (Phase 2)*: OAuth authorization code grant with expiring,
+   rotating tokens stored encrypted; read-only GraphQL adapter for shop, products, orders and daily
+   sales ([docs/SHOPIFY.md](docs/SHOPIFY.md)). Still to do: first run against the real store,
+   `app/uninstalled` webhook, sessions/conversion (needs Shopify analytics access).
 4. **Higgsfield** — generation jobs, polling/webhooks, asset storage.
-5. **Credential storage** — OAuth/token flows that save encrypted tokens in
-   `integration_connections` using `encryptSecret()`.
+5. **Credential storage** — done for Shopify (`integration_connections`, AES-256-GCM, DB constraints);
+   reuse it for Meta and Higgsfield.
 6. **Live execution (writes)** — only after the above: `ads_management` permission, idempotency
    keys, reconciliation for stuck `EXECUTING` requests, then relax the `dryRun: true` type and the
    `SIMULATED`-only DB constraint in a reviewed migration.
