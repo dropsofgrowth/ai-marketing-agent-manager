@@ -2,7 +2,7 @@ import "server-only";
 
 import { ZodError } from "zod";
 
-import { DomainError, isDomainError, type DomainErrorCode } from "@/domain/errors";
+import { DOMAIN_ERROR_CODES, DomainError, isDomainError, type DomainErrorCode } from "@/domain/errors";
 import { assertPermission } from "@/domain/permissions";
 import type { ShopifyConnectResult } from "@/domain/shopify-connect";
 import type { Actor, IntegrationConnection } from "@/domain/types";
@@ -46,6 +46,24 @@ import { STATE_MAX_AGE_SECONDS, createOAuthState, peekStateLocale, readOAuthStat
 const REFRESH_MARGIN_MS = 5 * 60_000;
 /** Write lastSyncedAt at most this often per connection (avoids a DB write per API call). */
 const SYNC_WRITE_INTERVAL_MS = 10 * 60_000;
+
+/**
+ * Token refresh budget. A refresh runs inside the connection's row-lock transaction,
+ * so its worst case (attempts × timeout + backoff = 3 × 10 s + 1 s + 2 s = 33 s) must
+ * finish well before CONNECTION_LOCK_TIMEOUT_MS — otherwise the transaction could
+ * expire after Shopify has already rotated the refresh token. A test enforces this.
+ */
+export const REFRESH_ATTEMPT_TIMEOUT_MS = 10_000;
+export const REFRESH_MAX_ATTEMPTS = 3;
+export const REFRESH_BACKOFF_MS = [1_000, 2_000] as const;
+
+/** Stored ciphertext that no longer decrypts — typically CREDENTIALS_ENCRYPTION_KEY changed. */
+class CredentialsUnreadableError extends Error {
+  constructor() {
+    super("Stored Shopify credentials could not be decrypted with the current key.");
+    this.name = "CredentialsUnreadableError";
+  }
+}
 
 // --- View models (safe for the UI: no ciphertext, no tokens) ---------------------
 
@@ -124,26 +142,40 @@ export function createShopifyConnectionService(deps: ShopifyConnectionDeps) {
 
   function decrypt(c: IntegrationConnection, config: ShopifyAppConfig): ShopifyCredentials {
     if (!c.encryptedCredentials) throw new DomainError("SHOPIFY_RECONNECT_REQUIRED");
-    return decryptCredentials(c.encryptedCredentials, config.encryptionKey, contextFor(c));
+    try {
+      return decryptCredentials(c.encryptedCredentials, config.encryptionKey, contextFor(c));
+    } catch {
+      throw new CredentialsUnreadableError();
+    }
   }
+
+  /** The reason stored on an ERROR connection, if it is a known code. */
+  const storedErrorCode = (c: IntegrationConnection): DomainErrorCode =>
+    (DOMAIN_ERROR_CODES as readonly string[]).includes(c.lastError ?? "")
+      ? (c.lastError as DomainErrorCode)
+      : "SHOPIFY_RECONNECT_REQUIRED";
 
   const needsRefresh = (c: IntegrationConnection) =>
     c.accessTokenExpiresAt !== null && c.accessTokenExpiresAt.getTime() - deps.now().getTime() < REFRESH_MARGIN_MS;
 
-  /** Wipes credentials and flags the connection; data pages then show "reconnect" instead of data. */
+  /**
+   * Flags the connection so pages show "reconnect" instead of data. Credentials are
+   * wiped unless `keepCredentials` (used when they merely can't be decrypted with the
+   * current key: deleting them would only destroy evidence, reconnecting replaces them).
+   */
   async function markReconnectRequired(
     repo: DataStore["connections"],
     c: IntegrationConnection,
     detail: string,
-    code: DomainErrorCode = "SHOPIFY_RECONNECT_REQUIRED",
+    options: { code?: DomainErrorCode; keepCredentials?: boolean } = {},
   ) {
+    const code = options.code ?? "SHOPIFY_RECONNECT_REQUIRED";
     await repo.update(c.workspaceId, c.id, {
       status: "ERROR",
       lastError: code,
-      encryptedCredentials: null,
-      credentialsKeyVersion: null,
-      accessTokenExpiresAt: null,
-      refreshTokenExpiresAt: null,
+      ...(options.keepCredentials
+        ? {}
+        : { encryptedCredentials: null, credentialsKeyVersion: null, accessTokenExpiresAt: null, refreshTokenExpiresAt: null }),
     });
     await store.audit.record({
       workspaceId: c.workspaceId,
@@ -158,6 +190,35 @@ export function createShopifyConnectionService(deps: ShopifyConnectionDeps) {
     logger("warn", "shopify.connection.reconnect_required", { shop: c.externalAccountId, detail, errorCode: code });
   }
 
+  /**
+   * Stored credentials that no longer decrypt (typically CREDENTIALS_ENCRYPTION_KEY was
+   * changed): flag the connection once, under the row lock so concurrent requests
+   * don't record it twice, and return the updated row.
+   */
+  async function flagUnreadable(c: IntegrationConnection): Promise<IntegrationConnection> {
+    return store.connections.withLock(c.workspaceId, c.id, async (current, tx) => {
+      if (current?.status === "CONNECTED") {
+        await markReconnectRequired(tx, current, "credentials_unreadable", {
+          code: "SHOPIFY_CREDENTIALS_UNREADABLE",
+          keepCredentials: true,
+        });
+      }
+      return { ...(current ?? c), status: "ERROR" as const, lastError: "SHOPIFY_CREDENTIALS_UNREADABLE" };
+    });
+  }
+
+  /** Detects undecryptable credentials before a page tries to use them. */
+  async function ensureReadable(c: IntegrationConnection, config: ShopifyAppConfig): Promise<IntegrationConnection> {
+    if (c.status !== "CONNECTED" || !c.encryptedCredentials) return c;
+    try {
+      decrypt(c, config);
+      return c;
+    } catch (error) {
+      if (error instanceof CredentialsUnreadableError) return flagUnreadable(c);
+      throw error;
+    }
+  }
+
   async function refreshWithRetry(config: ShopifyAppConfig, shop: string, refreshToken: string): Promise<ShopifyTokenSet> {
     for (let attempt = 1; ; attempt++) {
       try {
@@ -168,13 +229,14 @@ export function createShopifyConnectionService(deps: ShopifyConnectionDeps) {
           refreshToken,
           fetchImpl: deps.fetchImpl,
           now: deps.now(),
+          timeoutMs: REFRESH_ATTEMPT_TIMEOUT_MS,
         });
       } catch (error) {
         // Shopify answers repeated refreshes with the same refresh token identically for a
         // short window, so retrying a transient failure is safe; a rejection is final.
         const transient = error instanceof ShopifyOAuthError && error.reason !== "rejected";
-        if (!transient || attempt >= 3) throw error;
-        await sleep(attempt * 1_000);
+        if (!transient || attempt >= REFRESH_MAX_ATTEMPTS) throw error;
+        await sleep(REFRESH_BACKOFF_MS[attempt - 1] ?? REFRESH_BACKOFF_MS.at(-1)!);
       }
     }
   }
@@ -190,9 +252,36 @@ export function createShopifyConnectionService(deps: ShopifyConnectionDeps) {
    * from inside the lock so status changes are committed, then thrown outside.
    */
   async function accessToken(c: IntegrationConnection, config: ShopifyAppConfig, force: boolean) {
-    if (!force && !needsRefresh(c)) return { token: decrypt(c, config).accessToken, latest: c };
+    if (!force && !needsRefresh(c)) {
+      try {
+        return { token: decrypt(c, config).accessToken, latest: c };
+      } catch (error) {
+        if (!(error instanceof CredentialsUnreadableError)) throw error;
+        await flagUnreadable(c);
+        throw new DomainError("SHOPIFY_CREDENTIALS_UNREADABLE");
+      }
+    }
 
     const outcome = await store.connections.withLock<TokenOutcome>(c.workspaceId, c.id, async (current, tx) => {
+      try {
+        return await refreshUnderLock(current, tx);
+      } catch (error) {
+        if (!(error instanceof CredentialsUnreadableError) || !current) throw error;
+        await markReconnectRequired(tx, current, "credentials_unreadable", {
+          code: "SHOPIFY_CREDENTIALS_UNREADABLE",
+          keepCredentials: true,
+        });
+        return { ok: false, code: "SHOPIFY_CREDENTIALS_UNREADABLE" };
+      }
+    });
+
+    if (!outcome.ok) throw new DomainError(outcome.code);
+    return { token: outcome.token, latest: outcome.latest };
+
+    async function refreshUnderLock(
+      current: IntegrationConnection | null,
+      tx: DataStore["connections"],
+    ): Promise<TokenOutcome> {
       if (!current || current.status !== "CONNECTED" || current.externalAccountId !== c.externalAccountId) {
         return { ok: false, code: "SHOPIFY_NOT_CONNECTED" };
       }
@@ -249,10 +338,7 @@ export function createShopifyConnectionService(deps: ShopifyConnectionDeps) {
         refreshExpiresAt: (tokens.refreshTokenExpiresAt ?? current.refreshTokenExpiresAt)?.toISOString() ?? null,
       });
       return { ok: true, token: tokens.accessToken, latest: latest ?? current };
-    });
-
-    if (!outcome.ok) throw new DomainError(outcome.code);
-    return { token: outcome.token, latest: outcome.latest };
+    }
   }
 
   /** Records a successful call (throttled) and clears a stale transient warning. */
@@ -340,11 +426,11 @@ export function createShopifyConnectionService(deps: ShopifyConnectionDeps) {
     async status(workspaceId: string): Promise<ShopifyConnectionView> {
       const readiness = deps.readiness();
       if (!readiness.ready) return { state: readiness.reason, missing: readiness.missing };
-      const current = await currentFor(workspaceId, readiness.config);
-      if (!current) {
+      const stored = await currentFor(workspaceId, readiness.config);
+      if (!stored) {
         return { state: "ready", shopDomain: readiness.config.shopDomain, redirectUri: readiness.config.redirectUri };
       }
-      return viewOf(current, readiness.config);
+      return viewOf(await ensureReadable(stored, readiness.config), readiness.config);
     },
 
     /** Step 1: build the Shopify authorize URL and the signed state cookie. Changes nothing. */
@@ -495,7 +581,7 @@ export function createShopifyConnectionService(deps: ShopifyConnectionDeps) {
       const config = requireReady();
       const current = await currentFor(actor.workspaceId, config);
       if (!current) throw new DomainError("SHOPIFY_NOT_CONNECTED");
-      if (current.status === "ERROR") throw new DomainError("SHOPIFY_RECONNECT_REQUIRED");
+      if (current.status === "ERROR") throw new DomainError(storedErrorCode(current));
 
       let result: Awaited<ReturnType<typeof runVerificationQuery>>;
       try {
@@ -507,7 +593,7 @@ export function createShopifyConnectionService(deps: ShopifyConnectionDeps) {
       const scopes = assessScopes(result.scopes);
       if (result.shop.domain !== current.externalAccountId || scopes.write.length) {
         const code: DomainErrorCode = scopes.write.length ? "SHOPIFY_WRITE_SCOPES_GRANTED" : "SHOPIFY_RECONNECT_REQUIRED";
-        await markReconnectRequired(store.connections, current, "verification_mismatch", code);
+        await markReconnectRequired(store.connections, current, "verification_mismatch", { code });
         throw new DomainError(code);
       }
       if (scopes.missing.length) {
@@ -578,11 +664,11 @@ export function createShopifyConnectionService(deps: ShopifyConnectionDeps) {
           service: demo,
         };
       }
-      const current = await currentFor(workspaceId, readiness.config);
-      if (!current) return { mode: "demo", reason: "not_connected", service: demo };
+      const stored = await currentFor(workspaceId, readiness.config);
+      if (!stored) return { mode: "demo", reason: "not_connected", service: demo };
+      const current = await ensureReadable(stored, readiness.config);
       if (current.status === "ERROR") {
-        const code = (current.lastError ?? "SHOPIFY_RECONNECT_REQUIRED") as DomainErrorCode;
-        return { mode: "error", code, shopDomain: current.externalAccountId!, shopName: current.displayName };
+        return { mode: "error", code: storedErrorCode(current), shopDomain: current.externalAccountId!, shopName: current.displayName };
       }
       return {
         mode: "live",

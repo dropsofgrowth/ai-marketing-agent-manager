@@ -9,12 +9,18 @@ import { createMemoryLogger } from "@/server/logging";
 import { decryptSecret } from "@/server/security/encryption";
 import { buildDemoData, DEMO_USER, DEMO_WORKSPACE } from "@/server/store/demo-data";
 import { createMemoryStore } from "@/server/store/memory-store";
-import type { DataStore } from "@/server/store/types";
+import { CONNECTION_LOCK_TIMEOUT_MS, type DataStore } from "@/server/store/types";
 
 import { createFakeShopify } from "../../../../test/fake-shopify";
 
 import type { ShopifyAppConfig, ShopifyReadiness } from "./config";
-import { createShopifyConnectionService, type ShopifyConnectionService } from "./connection";
+import {
+  REFRESH_ATTEMPT_TIMEOUT_MS,
+  REFRESH_BACKOFF_MS,
+  REFRESH_MAX_ATTEMPTS,
+  createShopifyConnectionService,
+  type ShopifyConnectionService,
+} from "./connection";
 import { readOAuthState } from "./oauth-state";
 
 const SHOP = "drops-of-growth.myshopify.com";
@@ -48,6 +54,7 @@ describe("Shopify connection service", () => {
   let fake: ReturnType<typeof createFakeShopify>;
   let logger: ReturnType<typeof createMemoryLogger>;
   let service: ShopifyConnectionService;
+  let sleeps: number[];
 
   beforeEach(() => {
     clock = new Date("2026-11-04T10:00:00Z");
@@ -63,6 +70,7 @@ describe("Shopify connection service", () => {
       now: () => clock,
     });
     logger = createMemoryLogger();
+    sleeps = [];
     service = createShopifyConnectionService({
       store,
       readiness: () => readiness,
@@ -70,7 +78,9 @@ describe("Shopify connection service", () => {
       logger,
       now: () => clock,
       cache: createTtlCache(),
-      sleep: async () => {},
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
     });
   });
 
@@ -249,6 +259,62 @@ describe("Shopify connection service", () => {
     const connection = (await current())!;
     expect(connection).toMatchObject({ status: "CONNECTED", lastError: "SHOPIFY_UNAVAILABLE" });
     expect(connection.encryptedCredentials).not.toBeNull();
+    // Retried on the documented schedule, within the refresh budget.
+    expect(fake.state.tokenRequests.filter((r) => r.get("grant_type") === "refresh_token")).toHaveLength(REFRESH_MAX_ATTEMPTS);
+    expect(sleeps).toEqual([...REFRESH_BACKOFF_MS]);
+  });
+
+  it("keeps the worst-case token refresh well inside the row-lock timeout", () => {
+    const backoff = REFRESH_BACKOFF_MS.slice(0, REFRESH_MAX_ATTEMPTS - 1).reduce((sum, ms) => sum + ms, 0);
+    const worstCase = REFRESH_MAX_ATTEMPTS * REFRESH_ATTEMPT_TIMEOUT_MS + backoff;
+    // ≥ 10 s left for the database work in the same transaction.
+    expect(worstCase).toBeLessThanOrEqual(CONNECTION_LOCK_TIMEOUT_MS - 10_000);
+  });
+
+  it("asks to reconnect when the stored token can't be decrypted (encryption key changed)", async () => {
+    await connect();
+    const before = (await current())!;
+    readiness = { ready: true, config: { ...config, encryptionKey: randomBytes(32).toString("base64") } };
+
+    // Settings shows the specific reason right away, without calling Shopify.
+    const callsBefore = fake.state.graphqlRequests.length;
+    expect(await service.status(owner.workspaceId)).toMatchObject({ state: "error", code: "SHOPIFY_CREDENTIALS_UNREADABLE" });
+    expect(fake.state.graphqlRequests.length).toBe(callsBefore);
+
+    const after = (await current())!;
+    expect(after).toMatchObject({ status: "ERROR", lastError: "SHOPIFY_CREDENTIALS_UNREADABLE" });
+    expect(after.encryptedCredentials).toBe(before.encryptedCredentials); // kept, not destroyed
+    expect(await service.resolveSource(owner.workspaceId)).toMatchObject({ mode: "error", code: "SHOPIFY_CREDENTIALS_UNREADABLE" });
+    await expectCode(service.verify(owner), "SHOPIFY_CREDENTIALS_UNREADABLE");
+
+    // Recorded once, however often it is seen.
+    await service.status(owner.workspaceId);
+    const errors = (await store.audit.list(owner.workspaceId)).filter((e) => e.action === "integration.error");
+    expect(errors).toHaveLength(1);
+    expect(allLogs()).toContain("credentials_unreadable");
+
+    // Reconnecting (with the new key) restores live data.
+    expect((await connect()).outcome.result).toBe("connected");
+    expect(await current()).toMatchObject({ status: "CONNECTED", lastError: null });
+    expect((await service.resolveSource(owner.workspaceId)).mode).toBe("live");
+  });
+
+  it("handles undecryptable credentials met during a locked refresh", async () => {
+    await connect();
+    const source = await service.resolveSource(owner.workspaceId);
+    if (source.mode !== "live") throw new Error("expected live");
+    const stored = (await current())!;
+    // Another writer left ciphertext this key can't open; the refresh path re-reads it under the lock.
+    await store.connections.update(owner.workspaceId, stored.id, { encryptedCredentials: "v1.AAAA.BBBB.CCCC" });
+    clock = new Date(clock.getTime() + 58 * 60_000);
+
+    await expectCode(source.service.getShop(), "SHOPIFY_CREDENTIALS_UNREADABLE");
+    expect(await current()).toMatchObject({
+      status: "ERROR",
+      lastError: "SHOPIFY_CREDENTIALS_UNREADABLE",
+      encryptedCredentials: "v1.AAAA.BBBB.CCCC",
+    });
+    expect(fake.state.tokenRequests.filter((r) => r.get("grant_type") === "refresh_token")).toHaveLength(0);
   });
 
   it("marks the connection for reconnection when the app loses access (401 after refresh)", async () => {

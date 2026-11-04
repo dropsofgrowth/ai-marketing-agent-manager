@@ -85,6 +85,12 @@ export interface AuditRepository {
   list(workspaceId: string, options?: { limit?: number }): Promise<AuditLogEntry[]>;
 }
 
+/**
+ * Maximum duration of a connection's row-lock transaction (token refresh happens
+ * inside it). Keep it above the refresh worst case in the Shopify connection service.
+ */
+export const CONNECTION_LOCK_TIMEOUT_MS = 45_000;
+
 /** Statuses that make a connection the workspace's current one for its provider. */
 export const CURRENT_CONNECTION_STATUSES: readonly ConnectionStatus[] = ["CONNECTED", "ERROR"];
 

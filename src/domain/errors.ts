@@ -24,6 +24,8 @@ export const DOMAIN_ERROR_CODES = [
   "SHOPIFY_NOT_CONNECTED",
   /** Token revoked/expired beyond refresh, or the app was uninstalled. */
   "SHOPIFY_RECONNECT_REQUIRED",
+  /** Stored token can't be decrypted with the current CREDENTIALS_ENCRYPTION_KEY. */
+  "SHOPIFY_CREDENTIALS_UNREADABLE",
   /** Shopify could not be reached or returned an error; nothing was changed. */
   "SHOPIFY_UNAVAILABLE",
   "SHOPIFY_MISSING_SCOPES",

@@ -173,6 +173,7 @@ async function postTokenRequest(
   body: Record<string, string>,
   fetchImpl: FetchLike,
   now: Date,
+  timeoutMs = 15_000,
 ): Promise<ShopifyTokenSet> {
   let response: Response;
   try {
@@ -181,7 +182,7 @@ async function postTokenRequest(
       headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
       body: new URLSearchParams(body).toString(),
       redirect: "manual",
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
     throw new ShopifyOAuthError("unavailable", null);
@@ -226,6 +227,8 @@ export function refreshAccessToken(input: {
   refreshToken: string;
   fetchImpl: FetchLike;
   now: Date;
+  /** Per-request timeout; callers holding a lock pass a budget that fits it. */
+  timeoutMs?: number;
 }): Promise<ShopifyTokenSet> {
   return postTokenRequest(
     input.shop,
@@ -237,5 +240,6 @@ export function refreshAccessToken(input: {
     },
     input.fetchImpl,
     input.now,
+    input.timeoutMs,
   );
 }

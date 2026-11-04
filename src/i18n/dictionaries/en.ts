@@ -547,6 +547,8 @@ export const en = {
     SHOPIFY_APP_URL_MISMATCH: "Open the dashboard at its configured address (APP_URL) to connect Shopify.",
     SHOPIFY_NOT_CONNECTED: "Shopify isn't connected.",
     SHOPIFY_RECONNECT_REQUIRED: "Shopify access has ended. Connect Shopify again in Settings.",
+    SHOPIFY_CREDENTIALS_UNREADABLE:
+      "The saved Shopify access can't be decrypted — CREDENTIALS_ENCRYPTION_KEY was probably changed. Connect Shopify again.",
     SHOPIFY_UNAVAILABLE: "Shopify couldn't be reached. Nothing was changed — try again shortly.",
     SHOPIFY_MISSING_SCOPES: "The Shopify app is missing read access to orders or products.",
     SHOPIFY_WRITE_SCOPES_GRANTED:

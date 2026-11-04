@@ -543,6 +543,8 @@ export const ar: Dictionary = {
     SHOPIFY_APP_URL_MISMATCH: "افتح لوحة التحكم من عنوانها المُهيّأ (APP_URL) لربط Shopify.",
     SHOPIFY_NOT_CONNECTED: "Shopify غير متصل.",
     SHOPIFY_RECONNECT_REQUIRED: "انتهى وصول Shopify. أعد ربط Shopify من الإعدادات.",
+    SHOPIFY_CREDENTIALS_UNREADABLE:
+      "تعذّر فك تشفير وصول Shopify المحفوظ — على الأرجح تغيّر CREDENTIALS_ENCRYPTION_KEY. أعد ربط Shopify.",
     SHOPIFY_UNAVAILABLE: "تعذّر الوصول إلى Shopify. لم يتغيّر أي شيء — حاول مرة أخرى بعد قليل.",
     SHOPIFY_MISSING_SCOPES: "ينقص تطبيق Shopify صلاحية قراءة الطلبات أو المنتجات.",
     SHOPIFY_WRITE_SCOPES_GRANTED: "لدى تطبيق Shopify صلاحية كتابة. تُقبل صلاحيات القراءة فقط — أزل صلاحيات الكتابة وأعد الربط.",

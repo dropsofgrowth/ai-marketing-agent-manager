@@ -152,6 +152,7 @@ well inside Shopify's rate limits; each page view reads at most 20 pages of orde
 | Different store than `SHOPIFY_STORE_DOMAIN` | Fix the domain variable or connect from the right store. |
 | App was granted write access | Remove `write_*` scopes in the Dev Dashboard, release, reconnect. |
 | Reconnect needed | Refresh token expired (unused 90 days) or app uninstalled. Click **Reconnect**. |
+| Saved Shopify access can't be decrypted | `CREDENTIALS_ENCRYPTION_KEY` changed (keep it identical across deploys). Click **Reconnect**; the old ciphertext is kept, not deleted. |
 
 Server logs use events named `shopify.*` (e.g. `shopify.oauth.callback_rejected` with an
 `errorCode`, `shopify.graphql.failed` with `requestId`).

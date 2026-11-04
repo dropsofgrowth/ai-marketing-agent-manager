@@ -170,6 +170,13 @@ describe("token endpoint calls", () => {
       refreshAccessToken({ shop: "s.myshopify.com", clientId: "id", clientSecret: SECRET, refreshToken: "r", fetchImpl: down.fetchImpl, now: NOW }),
     ).rejects.toMatchObject({ reason: "unavailable", httpStatus: 503 });
 
+    // The per-request timeout is honoured (a hanging Shopify is aborted, not waited on).
+    const hanging: FetchLike = (_url, init) =>
+      new Promise((_resolve, reject) => init.signal?.addEventListener("abort", () => reject(init.signal?.reason)));
+    await expect(
+      refreshAccessToken({ shop: "s.myshopify.com", clientId: "id", clientSecret: SECRET, refreshToken: "r", fetchImpl: hanging, now: NOW, timeoutMs: 20 }),
+    ).rejects.toMatchObject({ reason: "unavailable", httpStatus: null });
+
     const offline: FetchLike = async () => {
       throw new TypeError("fetch failed");
     };

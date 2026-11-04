@@ -6,6 +6,7 @@ import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 
 import { toApproval, toAuditEntry, toAutomation, toConnection, toCreative } from "./prisma-mappers";
 import {
+  CONNECTION_LOCK_TIMEOUT_MS,
   CURRENT_CONNECTION_STATUSES,
   assertCiphertext,
   emptyStatusCounts,
@@ -14,7 +15,7 @@ import {
 } from "./types";
 
 /** Long enough for one token refresh round trip (with retries) while the row is locked. */
-const LOCK_TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 45_000 } as const;
+const LOCK_TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: CONNECTION_LOCK_TIMEOUT_MS } as const;
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
