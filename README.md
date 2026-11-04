@@ -105,7 +105,8 @@ For a shared preview deployment:
 | `npm test` | Unit tests (Vitest). `npm run test:watch` for watch mode. |
 | `npm run check` | lint + typecheck + tests. |
 | `npm run test:responsive` | Responsive + PWA smoke test against a running server (`BASE_URL`, optional `BASIC_AUTH=user:pass`, `SCREENSHOTS=dir`). First run: `npx playwright install chromium`. |
-| `npm run test:shopify-flow` | End-to-end Shopify connect flow against a simulated Shopify (see [docs/SHOPIFY.md](docs/SHOPIFY.md#8-tests)). |
+| `npm run test:shopify-flow` | End-to-end Shopify connect flow against a simulated Shopify (see [docs/SHOPIFY.md](docs/SHOPIFY.md#8-tests)). Optional `BASIC_AUTH=user:pass`. |
+| `npm run test:auth-gate` | With `DASHBOARD_BASIC_AUTH_*` set on the server: checks every page, dotted path, server action and API route needs the password while PWA files stay public (`BASE_URL`, `BASIC_AUTH=user:pass`). |
 | `npm run pwa:assets` | Regenerate PWA icons and `public/offline.html` (after changing the logo or the `offline` strings). |
 | `npm run db:migrate` | Create/apply migrations in development. |
 | `npm run db:deploy` | Apply committed migrations (CI/production). |
@@ -119,8 +120,8 @@ and no repository secrets:
 
 - **check** — `npm run check` (lint, typecheck, unit tests) and `npm run build`;
 - **integration** — PostgreSQL 16 service: migrations, schema-drift check, seed, repository tests; then the
-  Shopify connect flow against a *simulated* Shopify (fails if a token/secret/code reaches the server log or
-  a GraphQL mutation is sent) and the responsive + PWA smoke test.
+  Shopify connect flow against a *simulated* Shopify with Basic Auth on (fails if a token/secret/code reaches
+  the server log or a GraphQL mutation is sent), the Basic Auth gate check, and the responsive + PWA smoke test.
 
 ## Environment variables
 

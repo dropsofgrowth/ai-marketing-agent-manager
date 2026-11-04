@@ -9,7 +9,8 @@
  *
  * Env: BASE_URL (must equal APP_URL), SHOPIFY_STORE_DOMAIN (*-e2e.myshopify.com),
  *      SHOPIFY_CLIENT_SECRET (same fake value as the server), SCREENSHOTS=<dir>,
- *      KEEP_CONNECTED=1 to finish connected (skip the disconnect step).
+ *      KEEP_CONNECTED=1 to finish connected (skip the disconnect step),
+ *      BASIC_AUTH=user:password when the server has DASHBOARD_BASIC_AUTH_* set.
  */
 import { createHmac } from "node:crypto";
 import { mkdir } from "node:fs/promises";
@@ -21,6 +22,8 @@ const BASE = (process.env.BASE_URL ?? "http://localhost:3000").replace(/\/$/, ""
 const SHOP = process.env.SHOPIFY_STORE_DOMAIN ?? "";
 const SECRET = process.env.SHOPIFY_CLIENT_SECRET ?? "";
 const SHOTS = process.env.SCREENSHOTS;
+const [authUser, ...authRest] = (process.env.BASIC_AUTH ?? "").split(":");
+const httpCredentials = authUser ? { username: authUser, password: authRest.join(":") } : undefined;
 if (!SHOP.endsWith("-e2e.myshopify.com") || !SECRET) {
   console.error("Set SHOPIFY_STORE_DOMAIN=<name>-e2e.myshopify.com and the fake SHOPIFY_CLIENT_SECRET used by the server.");
   process.exit(2);
@@ -59,7 +62,7 @@ const browser = await chromium.launch();
 if (SHOTS) await mkdir(SHOTS, { recursive: true });
 const shot = async (page, name) => SHOTS && page.screenshot({ path: path.join(SHOTS, `${name}.png`), fullPage: true });
 
-const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, httpCredentials });
 const page = await context.newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
@@ -116,7 +119,7 @@ check(await visible(page.getByText("Meta Ads is still demo data")), "overview ex
 check(await visible(page.getByRole("heading", { name: "Store revenue" })), "revenue charted alone (not vs demo spend)");
 
 // 5. Arabic + phone layout with live data.
-const phone = await browser.newContext({ ...devices["iPhone 15"] });
+const phone = await browser.newContext({ ...devices["iPhone 15"], httpCredentials });
 await phone.route(`https://${SHOP}/**`, (route) => route.abort());
 const ar = await phone.newPage();
 await ar.goto(`${BASE}/ar/shopify`);

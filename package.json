@@ -16,6 +16,7 @@
     "test:watch": "vitest",
     "test:responsive": "node e2e/responsive.mjs",
     "test:shopify-flow": "node e2e/shopify-flow.mjs",
+    "test:auth-gate": "node e2e/auth-gate.mjs",
     "check": "npm run lint && npm run typecheck && npm run test",
     "pwa:assets": "tsx scripts/generate-pwa-assets.ts",
     "postinstall": "prisma generate",

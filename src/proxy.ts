@@ -3,11 +3,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { DEFAULT_LOCALE, LOCALE_COOKIE, isLocale, type Locale } from "@/i18n/config";
 
 /**
- * Runs before every page request and server action:
+ * Runs before every request except a short allow-list of public files (see `config`):
  * 1. Optional HTTP Basic Auth (DASHBOARD_BASIC_AUTH_USER/PASSWORD) — a stop-gap
- *    for preview deployments until real sign-in exists. Server actions are POSTs
- *    to page routes, so they are covered too.
- * 2. Redirects paths without a locale prefix to /en or /ar.
+ *    until real sign-in exists. Server actions are POSTs to page routes, and API
+ *    routes (incl. the Shopify OAuth callback) are covered too.
+ * 2. Redirects page paths without a locale prefix to /en or /ar.
  */
 
 async function digest(value: string): Promise<Uint8Array> {
@@ -68,6 +68,8 @@ export async function proxy(request: NextRequest) {
   }
 
   const { pathname } = request.nextUrl;
+  // API routes are authenticated above but never localized.
+  if (pathname === "/api" || pathname.startsWith("/api/")) return NextResponse.next();
   const firstSegment = pathname.split("/")[1];
   if (isLocale(firstSegment)) return NextResponse.next();
 
@@ -77,6 +79,16 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except API routes, Next.js internals and files with an extension.
-  matcher: ["/((?!api/|_next/|.*\\..*).*)"],
+  /*
+   * Everything goes through the proxy EXCEPT these public, data-free files: Next.js
+   * static assets, the health probe, and the PWA files browsers fetch without
+   * credentials (manifest, icons, service worker, offline page).
+   *
+   * Do not go back to excluding "any path with a dot": the [lang]/[...rest]
+   * catch-all renders the app shell for paths like /en/x.y, so that pattern let
+   * anyone bypass Basic Auth (see e2e/auth-gate.mjs, which guards this list).
+   */
+  matcher: [
+    "/((?!_next/static/|_next/image|api/health$|icons/|sw\\.js$|offline\\.html$|icon\\.svg$|apple-icon\\.png$|[a-z]{2}/manifest\\.webmanifest$).*)",
+  ],
 };

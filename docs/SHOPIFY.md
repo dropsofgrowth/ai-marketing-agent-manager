@@ -134,6 +134,9 @@ well inside Shopify's rate limits; each page view reads at most 20 pages of orde
   Token-shaped strings and secret-named fields are stripped (`src/server/logging.ts`).
 - **Read-only:** `assertReadOnlyDocument` blocks `mutation`/`subscription`; tokens with
   `write_*` scopes are refused at connect and revoked on verify.
+- **Access:** with Basic Auth on, every page, server action and API route — including the
+  OAuth callback — requires the password (`npm run test:auth-gate` checks it). Connect,
+  verify and disconnect also require the owner/admin role in the service layer.
 - **Audit log:** connected / verified / disconnected / needs-attention events.
 
 ## 7. Troubleshooting (result codes on the Settings page)

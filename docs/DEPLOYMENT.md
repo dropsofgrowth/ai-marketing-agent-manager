@@ -41,9 +41,11 @@ openssl rand -base64 24
 Leave every `META_*` and `HIGGSFIELD_*` variable **empty**. Add `SHOPIFY_*` only when
 you are ready to connect the store (see [docs/SHOPIFY.md](SHOPIFY.md)).
 
-Basic Auth protects every page and server action. The web-app manifest, icons,
-`/sw.js`, `/offline.html` and `/api/health` stay public on purpose: browsers fetch
-manifests without credentials, and none of these files contain data.
+Basic Auth protects every page, server action and API route (including the Shopify
+OAuth callback). The web-app manifest, icons, `/sw.js`, `/offline.html`, Next.js
+static assets and `/api/health` stay public on purpose: browsers fetch manifests
+without credentials, and none of these files contain data. `npm run test:auth-gate`
+checks this list against a running server.
 
 ---
 

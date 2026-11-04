@@ -87,16 +87,23 @@ jobs:
       - name: Install Chromium for Playwright
         run: npx playwright install --with-deps chromium
 
-      - name: Shopify connect flow against a simulated Shopify
+      - name: Shopify connect flow (simulated Shopify) + Basic Auth gate
+        env:
+          # Production-like: the dashboard password is on. Throwaway test value.
+          DASHBOARD_BASIC_AUTH_USER: ci-owner
+          DASHBOARD_BASIC_AUTH_PASSWORD: ci-throwaway-basic-auth-password
         run: |
           export CREDENTIALS_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+          export BASIC_AUTH="${DASHBOARD_BASIC_AUTH_USER}:${DASHBOARD_BASIC_AUTH_PASSWORD}"
           E2E_FAKE_SHOPIFY=1 E2E_FAKE_SHOPIFY_LOG="$RUNNER_TEMP/fake-shopify.log" \
             NODE_OPTIONS="--import ./e2e/fake-shopify-preload.mjs" \
             npx next start -p 3101 > "$RUNNER_TEMP/server-shopify.log" 2>&1 &
           for i in $(seq 1 60); do curl -sf http://localhost:3101/api/health > /dev/null && break; sleep 1; done
           BASE_URL=http://localhost:3101 npm run test:shopify-flow
-          # The server must never log a token, the client secret or an authorization code…
-          if grep -E "shpat_|shprt_|e2e_code_|${SHOPIFY_CLIENT_SECRET}" "$RUNNER_TEMP/server-shopify.log"; then
+          # Every page, dotted path, server action and API route needs the password.
+          BASE_URL=http://localhost:3101 npm run test:auth-gate
+          # The server must never log a token, a secret or an authorization code…
+          if grep -E "shpat_|shprt_|e2e_code_|${SHOPIFY_CLIENT_SECRET}|${DASHBOARD_BASIC_AUTH_PASSWORD}" "$RUNNER_TEMP/server-shopify.log"; then
             echo "::error::A token, secret or authorization code appeared in the server log"; exit 1
           fi
           # …and must never send a mutation to Shopify.
